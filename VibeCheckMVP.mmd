@@ -1,0 +1,60 @@
+---
+config:
+  layout: fixed
+---
+flowchart LR
+ subgraph CodeAgent["code agent interface"]
+        CL(("Claude Code"))
+        HC["Hook check"]
+        Script["Script (py)"]
+        Exec(("Exec"))
+  end
+ subgraph KnowledgeGate["Knowledge Gate<br>"]
+        AggMD["Agg.md"]
+        CompMD["Competence (global.md)"]
+        Gemini{"Gemini"}
+  end
+ subgraph QALoop["QA LOOP"]
+        ReactPage["Open react page<br>---<br><i>if terminal is feasible<br>use terminal</i>"]
+        QGen(("Question generation<br>by agent"))
+        PassNode["Pass"]
+        FailNode["Fail"]
+  end
+ subgraph MVP["MVP"]
+        CodeAgent
+        KnowledgeGate
+        QALoop
+        ResultNode["Result"]
+  end
+    User(("User (CLI)")) -- Prompt --> CL
+    CL -- <br> --> HC
+    HC -- Not patch --> CL
+    HC -- Patch --> Script
+    Script -- Prompt, old + new code --> CompMD
+    CompMD --> Gemini
+    Gemini -- Allow --> Exec
+    Gemini -- Competence model entries, block reasoning --> ReactPage
+    ReactPage --> QGen
+    QGen --> PassNode & FailNode
+    Gemini -- Block --> ReactPage
+    FailNode --> Exec & QGen
+    PassNode --> Exec
+    AggMD --> ReactPage & Gemini
+    QALoop -- Fail (3x) --> ResultNode
+    QALoop -- Pass --> ResultNode
+    QALoop -- Pass after retry(s) --> ResultNode
+    ResultNode -- Update competence model --> CompMD
+
+    linkStyle 4 stroke:#0000ff,color:#0000ff,fill:none
+    linkStyle 7 stroke:#2962FF,fill:none
+    linkStyle 8 stroke:#0000ff,color:#0000ff,fill:none
+    linkStyle 10 stroke:#00C853,fill:none
+    linkStyle 11 stroke:#ff0000,stroke-width:2px,color:#ff0000,fill:none
+    linkStyle 12 stroke:#ff0000,fill:none
+    linkStyle 13 stroke:#D50000,fill:none
+    linkStyle 14 stroke:#00C853,fill:none
+    linkStyle 15 stroke:#00C853,fill:none
+    linkStyle 17 stroke:#ff0000,fill:none
+    linkStyle 18 stroke:#00C853,fill:none
+    linkStyle 19 stroke:#FFD600,fill:none
+    linkStyle 20 stroke:#0000ff,fill:none
