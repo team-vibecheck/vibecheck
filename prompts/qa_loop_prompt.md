@@ -109,8 +109,6 @@ Your questions MUST:
 
 Avoid trivial or purely syntactic questions.
 
-This aligns with research showing that mechanism-focused and self-explanation questions significantly improve learning outcomes. :contentReference[oaicite:0]{index=0}
-
 ---
 
 ## Code Quality Expectations
