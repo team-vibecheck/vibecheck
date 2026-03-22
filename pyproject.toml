@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "vibecheck"
 version = "0.1.0"
@@ -12,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 vibecheck = "cli.main:main"
+vibecheck-hook = "hooks.pre_tool_use:main"
 
 [project.optional-dependencies]
 ui = ["gradio>=5.0"]
@@ -25,7 +30,17 @@ dev = [
 ]
 
 [tool.uv]
+package = true
 default-groups = ["dev"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["cli*", "client*", "core*", "hooks*", "qa*"]
+
+[tool.setuptools.package-data]
+"core.resources" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

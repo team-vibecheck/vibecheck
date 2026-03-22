@@ -3,24 +3,13 @@
 from __future__ import annotations
 
 import json
+import shlex
+import sys
 from pathlib import Path
 
 from core.competence_store import default_competence_model, save_competence_model
 
 _STATE_SUBDIRS = ["logs", "qa/pending", "qa/results", "agg"]
-
-_HOOK_COMMAND = "python3 -m hooks.pre_tool_use"
-
-_HOOK_CONFIG = {
-    "matcher": "Edit|Write|MultiEdit",
-    "hooks": [
-        {
-            "type": "command",
-            "command": _HOOK_COMMAND,
-            "timeout": 30,
-        }
-    ],
-}
 
 
 def run_cc_init() -> None:
@@ -28,11 +17,12 @@ def run_cc_init() -> None:
     claude_dir = project_root / ".claude"
     settings_path = claude_dir / "settings.json"
     state_dir = project_root / "state"
+    hook_command = _hook_command()
 
     # 1. Create/merge .claude/settings.json
     claude_dir.mkdir(exist_ok=True)
     settings = _load_or_empty(settings_path)
-    _merge_hook(settings)
+    _merge_hook(settings, hook_command)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     print(f"  Wrote hook config to {settings_path}")
 
@@ -52,7 +42,7 @@ def run_cc_init() -> None:
         print(f"  Competence model already exists at {cm_path}")
 
     print("\nVibeCheck is ready. Claude Code will use the PreToolUse hook")
-    print(f"to gate Edit, Write, and MultiEdit calls via: {_HOOK_COMMAND}")
+    print(f"to gate Edit, Write, and MultiEdit calls via: {hook_command}")
 
 
 def _load_or_empty(path: Path) -> dict:
@@ -64,8 +54,13 @@ def _load_or_empty(path: Path) -> dict:
     return {}
 
 
-def _merge_hook(settings: dict) -> None:
+def _hook_command() -> str:
+    return f"{shlex.quote(sys.executable)} -m hooks.pre_tool_use"
+
+
+def _merge_hook(settings: dict, hook_command: str | None = None) -> None:
     """Add the VibeCheck PreToolUse hook without clobbering existing hooks."""
+    command = hook_command or _hook_command()
     hooks = settings.setdefault("hooks", {})
     pre_tool_use: list = hooks.setdefault("PreToolUse", [])
 
@@ -73,7 +68,18 @@ def _merge_hook(settings: dict) -> None:
     for entry in pre_tool_use:
         entry_hooks = entry.get("hooks", [])
         for h in entry_hooks:
-            if "hooks.pre_tool_use" in h.get("command", ""):
+            if "hooks.pre_tool_use" in h.get("command", "") or h.get("command", "") == command:
                 return  # Already configured
 
-    pre_tool_use.append(_HOOK_CONFIG)
+    pre_tool_use.append(
+        {
+            "matcher": "Edit|Write|MultiEdit",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": command,
+                    "timeout": 30,
+                }
+            ],
+        }
+    )
