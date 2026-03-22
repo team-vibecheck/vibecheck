@@ -91,6 +91,8 @@ class QALoop:
                     feedback=evaluation.feedback,
                 )
             )
+            _try_show_feedback(renderer, evaluation.feedback, passed=evaluation.passed)
+
             if evaluation.passed:
                 apply_qa_outcome(
                     competence_model,
@@ -105,6 +107,7 @@ class QALoop:
                     status="pass",
                     details={"attempt_count": attempt_number},
                 )
+                _try_show_outcome(renderer, passed=True, attempt_count=attempt_number)
                 result = QAResult(
                     proposal_id=proposal.proposal_id,
                     final_decision="allow",
@@ -131,6 +134,7 @@ class QALoop:
             status="fail",
             details={"attempt_count": self.max_attempts},
         )
+        _try_show_outcome(renderer, passed=False, attempt_count=self.max_attempts)
         result = QAResult(
             proposal_id=proposal.proposal_id,
             final_decision="allow",
@@ -156,6 +160,16 @@ def _result_payload(result: QAResult) -> dict[str, object]:
         "summary": result.summary,
         "attempts": [asdict(attempt) for attempt in result.attempts],
     }
+
+
+def _try_show_feedback(renderer: object, feedback: str, *, passed: bool) -> None:
+    if hasattr(renderer, "show_feedback"):
+        renderer.show_feedback(feedback, passed=passed)  # type: ignore[union-attr]
+
+
+def _try_show_outcome(renderer: object, *, passed: bool, attempt_count: int) -> None:
+    if hasattr(renderer, "show_outcome"):
+        renderer.show_outcome(passed=passed, attempt_count=attempt_count)  # type: ignore[union-attr]
 
 
 def _write_yaml(path: Path, payload: dict[str, object]) -> None:
