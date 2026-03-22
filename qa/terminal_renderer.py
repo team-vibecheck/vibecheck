@@ -25,7 +25,7 @@ class TerminalQARenderer:
 
     def show_feedback(self, feedback: str, *, passed: bool) -> None:
         if passed:
-            self._write_output(f"\n  ✓ Correct.\n")
+            self._write_output("\n  ✓ Correct.\n")
         else:
             self._write_output(f"\n  ✗ Not quite. {feedback}\n")
 

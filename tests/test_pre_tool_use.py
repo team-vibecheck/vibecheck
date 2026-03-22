@@ -5,7 +5,6 @@ import pytest
 import yaml
 
 from core.errors import HookPayloadError, UnsupportedMutationError
-from core.event_logger import EventLogger
 from hooks.pre_tool_use import handle_pre_tool_use
 from qa.terminal_renderer import TerminalQARenderer
 

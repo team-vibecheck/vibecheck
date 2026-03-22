@@ -7,21 +7,19 @@ and non-mutation bypass producing no artifacts.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 import yaml
 
-from core.competence_store import default_competence_model, save_competence_model
+from core.competence_store import default_competence_model
 from core.errors import HookPayloadError, StateValidationError, UnsupportedMutationError
-from core.models import CompetenceGap, GateDecision, QAPacket
+from core.models import GateDecision
 from hooks.pre_tool_use import handle_pre_tool_use
 from hooks.stdin_payload import read_hook_payload
 from qa.loop import QALoop
 from qa.terminal_renderer import TerminalQARenderer
 from tests.test_qa_loop import FakeRenderer, _make_gate_decision, _make_proposal
-
 
 # --- Malformed JSON payload ---
 
