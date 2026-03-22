@@ -19,7 +19,7 @@ from qa.question_generation import select_question_type
 
 
 class KnowledgeGate:
-    def __init__(self, client: Any | None = None) -> None:
+    def __init__(self, client: OpenRouterClient | None = None) -> None:
         self._client = client or OpenRouterClient()
 
     def evaluate(
@@ -45,10 +45,10 @@ class KnowledgeGate:
                 aggregated_context=aggregated_context,
                 competence_model=competence_model,
             )
-        except Exception as exc:
+        except Exception:  # noqa: B904
             raise RuntimeError(
                 "Knowledge gate evaluation failed due to an error. Defaulting to allow."
-            ) from exc
+            ) from None
 
     def _create_input_data(
         self,

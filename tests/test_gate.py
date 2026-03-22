@@ -1,10 +1,16 @@
+from unittest.mock import MagicMock
+
 from core.competence_store import default_competence_model
 from core.context_aggregation import build_aggregated_context
-from core.gate import KnowledgeGate, evaluate_change
+from core.gate import KnowledgeGate
 from core.normalize import normalize_mutation_payload
 
 
-def test_gate_allows_small_change(tmp_path) -> None:
+def test_gate_allows_small_change(tmp_path, monkeypatch) -> None:
+    mock_client = MagicMock()
+    mock_client.create_response.return_value = '{"decision": "allow", "reasoning": "Small change.", "confidence": 0.9, "relevant_concepts": []}'
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: mock_client)
+
     proposal = normalize_mutation_payload(
         {
             "tool_name": "Write",
@@ -20,13 +26,29 @@ def test_gate_allows_small_change(tmp_path) -> None:
     )
     aggregated = build_aggregated_context(proposal, tmp_path)
 
-    decision = evaluate_change(proposal, aggregated, default_competence_model())
+    decision = KnowledgeGate(client=mock_client).evaluate(
+        proposal, aggregated, default_competence_model()
+    )
 
     assert decision.decision == "allow"
     assert decision.qa_packet is None
 
 
-def test_gate_blocks_larger_change(tmp_path) -> None:
+def test_gate_blocks_larger_change(tmp_path, monkeypatch) -> None:
+    mock_client = MagicMock()
+    mock_client.create_response.return_value = """{
+  "decision": "block",
+  "reasoning": "Large change requires validation.",
+  "confidence": 0.7,
+  "relevant_concepts": ["python_basics"],
+  "competence_gap": {
+    "size": "medium",
+    "rationale": "Control flow changed."
+  },
+  "prompt_seed": "Explain the control flow."
+}"""
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: mock_client)
+
     big_new_content = "\n".join(f"line_{index} = {index}" for index in range(30))
     proposal = normalize_mutation_payload(
         {
@@ -43,17 +65,18 @@ def test_gate_blocks_larger_change(tmp_path) -> None:
     )
     aggregated = build_aggregated_context(proposal, tmp_path)
 
-    decision = evaluate_change(proposal, aggregated, default_competence_model())
+    decision = KnowledgeGate(client=mock_client).evaluate(
+        proposal, aggregated, default_competence_model()
+    )
 
     assert decision.decision == "block"
     assert decision.qa_packet is not None
     assert decision.qa_packet.question_type == "plain_english"
 
 
-class FakeClient:
-    def create_response(self, input_data, **kwargs) -> str:  # type: ignore[no-untyped-def]
-        del input_data, kwargs
-        return """{
+def test_gate_uses_model_structured_output_when_client_available(tmp_path) -> None:
+    mock_client = MagicMock()
+    mock_client.create_response.return_value = """{
   "decision": "block",
   "reasoning": "The patch introduces behavior beyond demonstrated competence.",
   "confidence": 0.73,
@@ -65,8 +88,6 @@ class FakeClient:
   "prompt_seed": "Explain how the updated control flow avoids regressions."
 }"""
 
-
-def test_gate_uses_model_structured_output_when_client_available(tmp_path) -> None:
     big_new_content = "\n".join(f"line_{index} = {index}" for index in range(30))
     proposal = normalize_mutation_payload(
         {
@@ -83,7 +104,7 @@ def test_gate_uses_model_structured_output_when_client_available(tmp_path) -> No
     )
     aggregated = build_aggregated_context(proposal, tmp_path)
 
-    decision = KnowledgeGate(client=FakeClient()).evaluate(
+    decision = KnowledgeGate(client=mock_client).evaluate(
         proposal,
         aggregated,
         default_competence_model(),
