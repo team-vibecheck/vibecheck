@@ -1,51 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "vibecheck"
+name = "vibecheck-hoohacks"
 version = "0.1.0"
 description = "Competence-aware guardrail scaffold for AI-assisted coding"
 readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "you@example.com"},
+]
+keywords = ["claude", "ai", "coding", "competence", "guardrail", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "langchain-core>=0.3.79",
     "langchain-openrouter>=0.1.0",
     "pyyaml>=6.0.3",
 ]
 
-[project.scripts]
-vibecheck = "cli.main:main"
-
 [project.optional-dependencies]
 ui = ["gradio>=5.0"]
 graph = ["networkx>=3.0"]
 
-[dependency-groups]
-dev = [
-    "pyright>=1.1.408",
-    "pytest>=9.0.2",
-    "ruff>=0.15.7",
-]
+[project.urls]
+Homepage = "https://github.com/vibecheck-hoohacks/vibecheck"
+Documentation = "https://github.com/vibecheck-hoohacks/vibecheck#readme"
+Repository = "https://github.com/vibecheck-hoohacks/vibecheck"
+Issues = "https://github.com/vibecheck-hoohacks/vibecheck/issues"
 
-[tool.uv]
-default-groups = ["dev"]
+[project.scripts]
+vibecheck = "cli.main:main"
 
-[tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["tests"]
-
-[tool.pyright]
-include = ["cli", "client", "core", "hooks", "qa", "tests"]
-pythonVersion = "3.12"
-typeCheckingMode = "basic"
-venvPath = "."
-venv = ".venv"
-
-[tool.ruff]
-line-length = 100
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cli*", "client*", "core*", "hooks*", "qa*"]

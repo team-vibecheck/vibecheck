@@ -1,0 +1,2 @@
+[console_scripts]
+vibecheck = cli.main:main

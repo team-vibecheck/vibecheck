@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeCheck - Competence-Aware Guardrails for AI Coding</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --orange-500: #f97316;
+            --orange-400: #fb923c;
+            --orange-300: #fdba74;
+            --orange-600: #ea580c;
+            --orange-700: #c2410c;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 25%, #f97316 50%, #ea580c 75%, #c2410c 100%);
+            background-attachment: fixed;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 4rem 0;
+        }
+
+        .logo {
+            font-size: 4rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 4px 30px rgba(0,0,0,0.3);
+            letter-spacing: -0.02em;
+        }
+
+        .tagline {
+            font-size: 1.5rem;
+            font-weight: 300;
+            opacity: 0.95;
+            margin-bottom: 3rem;
+        }
+
+        .terminal {
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 2rem 2.5rem;
+            margin: 2rem auto;
+            max-width: 700px;
+            box-shadow: 
+                0 25px 50px -12px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        .terminal-header {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot.red { background: #ff5f56; }
+        .terminal-dot.yellow { background: #ffbd2e; }
+        .terminal-dot.green { background: #27ca40; }
+
+        .terminal-body {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.4rem;
+            line-height: 1.6;
+        }
+
+        .prompt {
+            color: #4ade80;
+            margin-right: 0.5rem;
+        }
+
+        .command {
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .package-name {
+            background: linear-gradient(90deg, #fbbf24, #f59e0b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 10px;
+            height: 1.4rem;
+            background: #4ade80;
+            margin-left: 4px;
+            animation: blink 1s step-end infinite;
+            vertical-align: text-bottom;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        .copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 0.75rem 1.5rem;
+            border-radius: 50px;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1.5rem;
+        }
+
+        .copy-btn:hover {
+            background: rgba(255,255,255,0.25);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .copy-btn.copied {
+            background: #4ade80;
+            border-color: #4ade80;
+            color: #000;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin: 4rem 0;
+            padding: 0 1rem;
+        }
+
+        .feature {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 1.75rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .feature:hover {
+            transform: translateY(-4px);
+            background: rgba(255,255,255,0.15);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-desc {
+            font-size: 0.95rem;
+            opacity: 0.85;
+            line-height: 1.6;
+        }
+
+        .how-it-works {
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 3rem;
+            margin: 2rem 0;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .how-it-works h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .steps {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2rem;
+        }
+
+        .step {
+            text-align: center;
+            flex: 1;
+            min-width: 200px;
+            max-width: 280px;
+        }
+
+        .step-number {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #000;
+            margin: 0 auto 1rem;
+        }
+
+        .step-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .step-desc {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 3rem 0 1rem;
+            opacity: 0.7;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .footer-links a {
+            color: #fff;
+            text-decoration: none;
+            font-weight: 500;
+            transition: opacity 0.3s;
+        }
+
+        .footer-links a:hover {
+            opacity: 0.7;
+        }
+
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            background: rgba(255,255,255,0.1);
+            padding: 0.4rem 1rem;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            .logo {
+                font-size: 2.5rem;
+            }
+            
+            .tagline {
+                font-size: 1.1rem;
+            }
+            
+            .terminal {
+                padding: 1.5rem;
+                margin: 1rem;
+            }
+            
+            .terminal-body {
+                font-size: 1rem;
+            }
+            
+            .features {
+                grid-template-columns: 1fr;
+            }
+            
+            .how-it-works {
+                padding: 2rem 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <section class="hero">
+            <h1 class="logo">VibeCheck</h1>
+            <p class="tagline">Competence-aware guardrails for AI-assisted coding</p>
+            
+            <div class="terminal">
+                <div class="terminal-header">
+                    <span class="terminal-dot red"></span>
+                    <span class="terminal-dot yellow"></span>
+                    <span class="terminal-dot green"></span>
+                </div>
+                <div class="terminal-body">
+                    <span class="prompt">$</span>
+                    <span class="command">pip install <span class="package-name">vibecheck-hoohacks</span></span>
+                    <span class="cursor"></span>
+                </div>
+                <button class="copy-btn" onclick="copyCommand()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span id="copy-text">Copy</span>
+                </button>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="feature">
+                <div class="feature-icon">🧠</div>
+                <h3 class="feature-title">Knowledge Gate</h3>
+                <p class="feature-desc">Automatically evaluates code change complexity against your demonstrated competence level.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🎯</div>
+                <h3 class="feature-title">Targeted Q&A</h3>
+                <p class="feature-desc">Generates questions that probe understanding of why code works, not just what it does.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">📈</div>
+                <h3 class="feature-title">Competence Tracking</h3>
+                <p class="feature-desc">Persistent YAML model tracks your skills across Python concepts and patterns.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔄</div>
+                <h3 class="feature-title">Scaffolding</h3>
+                <p class="feature-desc">3-level difficulty adaptation from conceptual questions to direct hints.</p>
+            </div>
+        </section>
+
+        <section class="how-it-works">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3 class="step-title">Intercept</h3>
+                    <p class="step-desc">Claude Code calls a tool. VibeCheck intercepts before the change is applied.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3 class="step-title">Evaluate</h3>
+                    <p class="step-desc">The knowledge gate assesses complexity against your competence model.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3 class="step-title">Question</h3>
+                    <p class="step-desc">Complex changes trigger an interactive Q&A that tests your understanding.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3 class="step-title">Learn</h3>
+                    <p class="step-desc">Your competence model updates based on your demonstrated knowledge.</p>
+                </div>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <div class="footer-links">
+                <a href="https://github.com/vibecheck-hoohacks/vibecheck">GitHub</a>
+                <a href="https://github.com/vibecheck-hoohacks/vibecheck/issues">Issues</a>
+                <a href="https://pypi.org/project/vibecheck-hoohacks/">PyPI</a>
+            </div>
+            <div class="badges">
+                <span class="badge">Python 3.12+</span>
+                <span class="badge">MIT License</span>
+                <span class="badge">LangChain</span>
+                <span class="badge">OpenRouter</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        function copyCommand() {
+            navigator.clipboard.writeText('pip install vibecheck-hoohacks').then(() => {
+                const btn = document.querySelector('.copy-btn');
+                const text = document.getElementById('copy-text');
+                btn.classList.add('copied');
+                text.textContent = 'Copied!';
+                setTimeout(() => {
+                    btn.classList.remove('copied');
+                    text.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
