@@ -1,8 +1,44 @@
 user_id: local_default
-updated_at: 2026-03-21T00:00:00Z
+updated_at: '2026-03-22T13:55:11Z'
 concepts:
   python_basics:
     score: 0.5
     notes:
-      - Initial scaffold entry for Python changes.
+    - Initial scaffold entry for Python changes.
     evidence: []
+  asyncio:
+    score: 0.48
+    notes:
+    - Reached QA fail limit; potential epistemic debt remains.
+    - Validated understanding through scaffold QA.
+    evidence:
+    - timestamp: '2026-03-22T13:48:47Z'
+      outcome: fail_limit_reached
+      note: Reached QA fail limit; potential epistemic debt remains.
+    - timestamp: '2026-03-22T13:55:11Z'
+      outcome: pass_after_3
+      note: Validated understanding through scaffold QA.
+  concurrency:
+    score: 0.48
+    notes:
+    - Reached QA fail limit; potential epistemic debt remains.
+    - Validated understanding through scaffold QA.
+    evidence:
+    - timestamp: '2026-03-22T13:48:47Z'
+      outcome: fail_limit_reached
+      note: Reached QA fail limit; potential epistemic debt remains.
+    - timestamp: '2026-03-22T13:55:11Z'
+      outcome: pass_after_3
+      note: Validated understanding through scaffold QA.
+  producer-consumer pattern:
+    score: 0.48
+    notes:
+    - Reached QA fail limit; potential epistemic debt remains.
+    - Validated understanding through scaffold QA.
+    evidence:
+    - timestamp: '2026-03-22T13:48:47Z'
+      outcome: fail_limit_reached
+      note: Reached QA fail limit; potential epistemic debt remains.
+    - timestamp: '2026-03-22T13:55:11Z'
+      outcome: pass_after_3
+      note: Validated understanding through scaffold QA.
