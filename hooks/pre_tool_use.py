@@ -8,9 +8,17 @@ from core.competence_store import load_competence_model
 from core.context_aggregation import build_aggregated_context
 from core.errors import VibeCheckError
 from core.gate import evaluate_change
+from core.models import ChangeProposal
 from core.normalize import is_code_mutation_tool, normalize_mutation_payload
 from hooks.decision_output import allow_response, deny_response, emit_decision
-from hooks.stdin_payload import get_tool_name, read_hook_payload
+from hooks.stdin_payload import (
+    discover_repo_notes,
+    extract_transcript_excerpt,
+    extract_user_prompt_excerpt,
+    get_cwd,
+    get_tool_name,
+    read_hook_payload,
+)
 from qa.loop import QALoop
 
 STATE_DIR = Path("state")
@@ -28,14 +36,22 @@ def handle_pre_tool_use(
             {"tool_name": tool_name},
         )
 
-    proposal = normalize_mutation_payload(payload)
+    cwd = get_cwd(payload)
+    transcript_excerpt = _optional_text(payload, "transcript_excerpt") or extract_transcript_excerpt(payload)
+    user_prompt_excerpt = _optional_text(payload, "user_prompt_excerpt") or extract_user_prompt_excerpt(
+        payload,
+        transcript_excerpt,
+    )
+    repo_notes = _optional_text(payload, "repo_notes") or discover_repo_notes(cwd)
+
+    proposal = normalize_mutation_payload(payload, cwd=cwd)
     aggregated_context = build_aggregated_context(
         proposal,
         state_dir,
-        user_prompt_excerpt=_optional_text(payload, "user_prompt_excerpt"),
-        transcript_excerpt=_optional_text(payload, "transcript_excerpt"),
-        surrounding_code=_optional_text(payload, "surrounding_code"),
-        repo_notes=_optional_text(payload, "repo_notes"),
+        user_prompt_excerpt=user_prompt_excerpt,
+        transcript_excerpt=transcript_excerpt,
+        surrounding_code=_optional_text(payload, "surrounding_code") or _derive_surrounding_code(proposal),
+        repo_notes=repo_notes,
     )
     competence_path = state_dir / "competence_model.yaml"
     competence_model = load_competence_model(competence_path)
@@ -80,6 +96,13 @@ def main() -> None:
 def _optional_text(payload: Mapping[str, Any], key: str) -> str:
     value = payload.get(key)
     return value if isinstance(value, str) else ""
+
+
+def _derive_surrounding_code(payload: ChangeProposal) -> str:
+    blocks: list[str] = []
+    for target in payload.targets:
+        blocks.append(f"# {target.path}\n{target.old_content or target.new_content}")
+    return "\n\n".join(blocks)
 
 
 if __name__ == "__main__":
