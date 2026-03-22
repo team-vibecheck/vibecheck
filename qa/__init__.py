@@ -1,5 +1,3 @@
 from qa.loop import QALoop
 
-__all__ = [
-    "QALoop",
-]
+__all__ = ["QALoop"]

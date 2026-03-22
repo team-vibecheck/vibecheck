@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 from core.errors import HookPayloadError, UnsupportedMutationError
 from hooks.pre_tool_use import handle_pre_tool_use
+from qa.llm_wrapper import GeneratedQuestion
 from qa.terminal_renderer import TerminalQARenderer
 
 
@@ -36,7 +39,13 @@ def test_pre_tool_use_bypasses_non_mutation_tools(tmp_path: Path) -> None:
     assert "mutation_normalized" not in event_names
 
 
-def test_pre_tool_use_allows_small_write_with_realistic_claude_payload(tmp_path: Path) -> None:
+def test_pre_tool_use_allows_small_write_with_realistic_claude_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    mock_client = MagicMock()
+    mock_client.create_response.return_value = '{"decision": "allow", "reasoning": "Small change.", "confidence": 0.9, "relevant_concepts": []}'
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: mock_client)
+
     repo = tmp_path / "repo"
     state_dir = tmp_path / "state"
     target = repo / "core" / "example.py"
@@ -91,6 +100,36 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state_dir = tmp_path / "state"
+    mock_client = MagicMock()
+    mock_client.create_response.return_value = """{
+  "decision": "block",
+  "reasoning": "Large change requires validation.",
+  "confidence": 0.7,
+  "relevant_concepts": ["python_basics"],
+  "competence_gap": {
+    "size": "medium",
+    "rationale": "Control flow changed."
+  },
+  "prompt_seed": "Explain the assignment mechanism."
+}"""
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: mock_client)
+
+    class FakeLLMClient:
+        def generate_question(self, gate_decision, attempt_number, competence_entries=None):
+            del competence_entries
+            return GeneratedQuestion(
+                question=f"Attempt {attempt_number}: explain the mechanism. {gate_decision.qa_packet.prompt_seed}",
+                distractors=[],
+                hint="Think about the mechanism.",
+            )
+
+        def evaluate_answer(self, question, answer, question_type, context_excerpt, attempt_number):
+            del question, answer, question_type, context_excerpt, attempt_number
+            return SimpleNamespace(passed=True, feedback="Good explanation!")
+
+    from qa import llm_wrapper as llm_wrapper_module
+
+    monkeypatch.setattr(llm_wrapper_module, "_client", FakeLLMClient())
 
     def fake_ask(
         self: TerminalQARenderer,

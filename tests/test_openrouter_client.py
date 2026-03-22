@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from pathlib import Path
 from urllib.error import HTTPError
 
 import pytest
 
 from client.openrouter_client import InputMessage, OpenRouterClient, OpenRouterClientError
+from core.config import ProviderConfig, save_config
 
 
 class FakeHTTPResponse:
@@ -22,6 +24,19 @@ class FakeHTTPResponse:
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         del exc_type, exc_val, exc_tb
         return False
+
+
+def _write_config(tmp_path: Path) -> Path:
+    config_file = tmp_path / "config.toml"
+    save_config(
+        ProviderConfig(
+            api_key="stored-key",
+            base_url="https://openrouter.ai/api/v1",
+            default_model="anthropic/claude-sonnet-4",
+        ),
+        config_file,
+    )
+    return config_file
 
 
 def test_create_response_sends_expected_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,8 +117,55 @@ def test_complete_text_reads_nested_output_blocks(monkeypatch: pytest.MonkeyPatc
 def test_client_raises_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
-    with pytest.raises(OpenRouterClientError, match="OPENROUTER_API_KEY"):
+    with pytest.raises(OpenRouterClientError, match="OpenRouter credentials are required"):
         OpenRouterClient()
+
+
+def test_client_uses_saved_config_when_env_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout: float):  # type: ignore[no-untyped-def]
+        captured["headers"] = dict(req.headers)
+        captured["timeout"] = timeout
+        return FakeHTTPResponse({"output_text": "Hello from config."})
+
+    monkeypatch.setattr("client.openrouter_client.request.urlopen", fake_urlopen)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("core.config._CONFIG_FILE", _write_config(tmp_path))
+
+    client = OpenRouterClient()
+
+    response = client.create_response("hello")
+
+    headers_dict = captured["headers"]
+    assert isinstance(headers_dict, dict)
+    assert "stored-key" in headers_dict.get("Authorization", "")
+    assert response == "Hello from config."
+
+
+def test_env_wins_over_saved_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout: float):  # type: ignore[no-untyped-def]
+        del timeout
+        captured["headers"] = dict(req.headers)
+        return FakeHTTPResponse({"output_text": "Hello from env."})
+
+    monkeypatch.setattr("client.openrouter_client.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("core.config._CONFIG_FILE", _write_config(tmp_path))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "env-key")
+
+    client = OpenRouterClient()
+
+    response = client.create_response("hello")
+
+    headers_dict = captured["headers"]
+    assert isinstance(headers_dict, dict)
+    assert "env-key" in headers_dict.get("Authorization", "")
+    assert "stored-key" not in headers_dict.get("Authorization", "")
+    assert response == "Hello from env."
 
 
 def test_client_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:

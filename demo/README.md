@@ -87,7 +87,7 @@ After running the demo, check these files:
 
 ## Troubleshooting
 
-**No OPENROUTER_API_KEY:** The LLM gate falls back to a heuristic scaffold. It still works, but uses diff size instead of semantic analysis. For the full demo experience, set the key.
+**No OPENROUTER_API_KEY:** If you already ran `vibecheck auth`, runtime falls back to `~/.vibecheck/config.toml`. If neither env nor config is available, the gate and QA loop fail fast until credentials are configured.
 
 **Claude Code not installed:** Steps 0-3 work without it. Step 4 is optional and requires `claude` CLI.
 

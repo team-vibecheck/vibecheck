@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
+
+from core.config import resolve_provider_config
 
 
 class OpenRouterClientError(RuntimeError):
@@ -29,15 +30,21 @@ class OpenRouterClient:
         site_url: str | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
-        resolved_key = os.environ.get("OPENROUTER_API_KEY")
-        if not resolved_key:
+        try:
+            config = resolve_provider_config()
+        except FileNotFoundError as exc:
             raise OpenRouterClientError(
-                "OPENROUTER_API_KEY is required. Provide api_key or set the environment variable."
+                "OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'vibecheck auth'."
+            ) from exc
+
+        if not config.api_key:
+            raise OpenRouterClientError(
+                "OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'vibecheck auth'."
             )
 
-        self._api_key = resolved_key
+        self._api_key = config.api_key
         self._model = model
-        self._endpoint = "https://openrouter.ai/api/v1/responses"
+        self._endpoint = f"{config.base_url.rstrip('/')}/responses"
         self._app_name = "VibeCheck"
         self._site_url = site_url
         self._timeout_seconds = timeout_seconds

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
 from core.errors import HookPayloadError
 from hooks.pre_tool_use import handle_pre_tool_use
+from qa.llm_wrapper import GeneratedQuestion
 from qa.terminal_renderer import TerminalQARenderer
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -28,7 +30,11 @@ def _read_events(state_dir: Path) -> list[dict]:
     log_path = state_dir / "logs" / "events.jsonl"
     if not log_path.exists():
         return []
-    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _strip_meta(fixture: dict) -> dict:
@@ -36,19 +42,72 @@ def _strip_meta(fixture: dict) -> dict:
     return {k: v for k, v in fixture.items() if not k.startswith("_")}
 
 
+def _install_gate_client(monkeypatch: pytest.MonkeyPatch, *, decision: str) -> None:
+    if decision == "allow":
+        response = '{"decision": "allow", "reasoning": "Small change.", "confidence": 0.9, "relevant_concepts": []}'
+    else:
+        response = """{
+  "decision": "block",
+  "reasoning": "Large change requires validation.",
+  "confidence": 0.7,
+  "relevant_concepts": ["python_basics"],
+  "competence_gap": {
+    "size": "medium",
+    "rationale": "Control flow changed."
+  },
+  "prompt_seed": "Explain the assignment mechanism."
+}"""
+
+    class FakeGateClient:
+        def create_response(self, *args, **kwargs):
+            del args, kwargs
+            return response
+
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: FakeGateClient())
+
+
+def _install_question_client(
+    monkeypatch: pytest.MonkeyPatch, *, passed_sequence: list[bool]
+) -> None:
+    outcomes = iter(passed_sequence)
+
+    class FakeQuestionClient:
+        def generate_question(self, gate_decision, attempt_number, competence_entries=None):
+            del competence_entries
+            return GeneratedQuestion(
+                question=f"Attempt {attempt_number}: explain the mechanism. {gate_decision.qa_packet.prompt_seed}",
+                distractors=[],
+                hint="Think about the mechanism.",
+            )
+
+        def evaluate_answer(self, question, answer, question_type, context_excerpt, attempt_number):
+            del question, answer, question_type, context_excerpt, attempt_number
+            passed = next(outcomes)
+            feedback = "Good explanation!" if passed else "Not enough detail."
+            return SimpleNamespace(passed=passed, feedback=feedback)
+
+    from qa import llm_wrapper as llm_wrapper_module
+
+    monkeypatch.setattr(llm_wrapper_module, "_client", FakeQuestionClient())
+
+
 class TestFixture01SmallWriteAllow:
-    def test_gate_allows_small_write(self, tmp_path: Path) -> None:
+    def test_gate_allows_small_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         fixture = _load_fixture("01_small_write_allow.json")
         state_dir = tmp_path / "state"
+        _install_gate_client(monkeypatch, decision="allow")
 
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
         assert response["hookSpecificOutput"]["permissionDecision"] == "allow"
         assert response["metadata"]["gate_decision"] == "allow"
 
-    def test_no_qa_artifacts_on_allow(self, tmp_path: Path) -> None:
+    def test_no_qa_artifacts_on_allow(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         fixture = _load_fixture("01_small_write_allow.json")
         state_dir = tmp_path / "state"
+        _install_gate_client(monkeypatch, decision="allow")
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -59,9 +118,10 @@ class TestFixture01SmallWriteAllow:
             (state_dir / "qa" / "results").iterdir()
         )
 
-    def test_event_log_allow_flow(self, tmp_path: Path) -> None:
+    def test_event_log_allow_flow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         fixture = _load_fixture("01_small_write_allow.json")
         state_dir = tmp_path / "state"
+        _install_gate_client(monkeypatch, decision="allow")
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -78,6 +138,8 @@ class TestFixture02LargeWriteBlockPass:
         fixture = _load_fixture("02_large_write_block_pass.json")
         state_dir = tmp_path / "state"
         fake_answer = fixture["_fake_answer"]
+        _install_gate_client(monkeypatch, decision="block")
+        _install_question_client(monkeypatch, passed_sequence=[True])
 
         monkeypatch.setattr(
             TerminalQARenderer,
@@ -91,9 +153,13 @@ class TestFixture02LargeWriteBlockPass:
         assert response["metadata"]["qa_passed"] is True
         assert response["metadata"]["attempt_count"] == 1
 
-    def test_result_artifact_structure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_result_artifact_structure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         fixture = _load_fixture("02_large_write_block_pass.json")
         state_dir = tmp_path / "state"
+        _install_gate_client(monkeypatch, decision="block")
+        _install_question_client(monkeypatch, passed_sequence=[True])
 
         monkeypatch.setattr(
             TerminalQARenderer,
@@ -111,9 +177,13 @@ class TestFixture02LargeWriteBlockPass:
         assert result_data["final_decision"] == "allow"
         assert len(result_data["attempts"]) == 1
 
-    def test_competence_updated_on_pass(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_competence_updated_on_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         fixture = _load_fixture("02_large_write_block_pass.json")
         state_dir = tmp_path / "state"
+        _install_gate_client(monkeypatch, decision="block")
+        _install_question_client(monkeypatch, passed_sequence=[True])
 
         monkeypatch.setattr(
             TerminalQARenderer,
@@ -132,6 +202,8 @@ class TestFixture03LargeWriteBlockFailLimit:
         fixture = _load_fixture("03_large_write_block_fail_limit.json")
         state_dir = tmp_path / "state"
         answers = iter(fixture["_fake_answers"])
+        _install_gate_client(monkeypatch, decision="block")
+        _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
         monkeypatch.setattr(
             TerminalQARenderer,
@@ -145,10 +217,14 @@ class TestFixture03LargeWriteBlockFailLimit:
         assert response["metadata"]["qa_passed"] is False
         assert response["metadata"]["attempt_count"] == 3
 
-    def test_competence_docked_on_fail(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_competence_docked_on_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         fixture = _load_fixture("03_large_write_block_fail_limit.json")
         state_dir = tmp_path / "state"
         answers = iter(fixture["_fake_answers"])
+        _install_gate_client(monkeypatch, decision="block")
+        _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
         monkeypatch.setattr(
             TerminalQARenderer,
@@ -162,10 +238,14 @@ class TestFixture03LargeWriteBlockFailLimit:
         assert "fail_limit_reached" in competence
         assert "epistemic debt" in competence.lower()
 
-    def test_event_log_records_all_attempts(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_event_log_records_all_attempts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         fixture = _load_fixture("03_large_write_block_fail_limit.json")
         state_dir = tmp_path / "state"
         answers = iter(fixture["_fake_answers"])
+        _install_gate_client(monkeypatch, decision="block")
+        _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
         monkeypatch.setattr(
             TerminalQARenderer,

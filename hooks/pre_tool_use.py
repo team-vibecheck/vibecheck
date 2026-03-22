@@ -47,13 +47,17 @@ def handle_pre_tool_use(
     if not is_code_mutation_tool(tool_name):
         logger.log("non_mutation_bypass", tool_name=logged_tool_name, status="allow")
         return allow_response(
-            "Non-mutation tool call bypassed by VibeCheck scaffold.",
+            "Non-mutation tool call bypassed by VibeCheck.",
             {"tool_name": tool_name},
         )
 
     cwd = get_cwd(payload)
-    transcript_excerpt = _optional_text(payload, "transcript_excerpt") or extract_transcript_excerpt(payload)
-    user_prompt_excerpt = _optional_text(payload, "user_prompt_excerpt") or extract_user_prompt_excerpt(
+    transcript_excerpt = _optional_text(
+        payload, "transcript_excerpt"
+    ) or extract_transcript_excerpt(payload)
+    user_prompt_excerpt = _optional_text(
+        payload, "user_prompt_excerpt"
+    ) or extract_user_prompt_excerpt(
         payload,
         transcript_excerpt,
     )
@@ -73,7 +77,8 @@ def handle_pre_tool_use(
         state_dir,
         user_prompt_excerpt=user_prompt_excerpt,
         transcript_excerpt=transcript_excerpt,
-        surrounding_code=_optional_text(payload, "surrounding_code") or _derive_surrounding_code(proposal),
+        surrounding_code=_optional_text(payload, "surrounding_code")
+        or _derive_surrounding_code(proposal),
         repo_notes=repo_notes,
     )
     logger.log("context_aggregated", proposal_id=proposal.proposal_id)

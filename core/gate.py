@@ -4,7 +4,7 @@ from typing import Any
 
 from langchain_core.output_parsers import JsonOutputParser
 
-from client.openrouter_client import InputMessage, OpenRouterClient, OpenRouterClientError
+from client.openrouter_client import InputMessage, OpenRouterClient
 from core.models import (
     AggregatedContext,
     ChangeProposal,
@@ -28,7 +28,6 @@ class KnowledgeGate:
         aggregated_context: AggregatedContext,
         competence_model: CompetenceModel,
     ) -> GateDecision:
-
         parser = JsonOutputParser()
         input_data = self._create_input_data(proposal, aggregated_context, competence_model, parser)
         try:
@@ -45,10 +44,8 @@ class KnowledgeGate:
                 aggregated_context=aggregated_context,
                 competence_model=competence_model,
             )
-        except Exception:  # noqa: B904
-            raise RuntimeError(
-                "Knowledge gate evaluation failed due to an error. Defaulting to allow."
-            ) from None
+        except Exception as exc:  # noqa: B904
+            raise RuntimeError("Knowledge gate evaluation failed.") from exc
 
     def _create_input_data(
         self,
@@ -208,10 +205,4 @@ def evaluate_change(
     aggregated_context: AggregatedContext,
     competence_model: CompetenceModel,
 ) -> GateDecision:
-    """Evaluate a change proposal. Uses LLM gate if API key is available, falls back to scaffold."""
-    try:
-        return KnowledgeGate().evaluate(proposal, aggregated_context, competence_model)
-    except (OpenRouterClientError, RuntimeError):
-        from core.llm_adapter import ScaffoldGateModelAdapter
-
-        return ScaffoldGateModelAdapter().evaluate(proposal, aggregated_context, competence_model)
+    return KnowledgeGate().evaluate(proposal, aggregated_context, competence_model)

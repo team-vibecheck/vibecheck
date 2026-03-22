@@ -17,11 +17,14 @@ from core.errors import HookPayloadError, StateValidationError, UnsupportedMutat
 from core.models import GateDecision
 from hooks.pre_tool_use import handle_pre_tool_use
 from hooks.stdin_payload import read_hook_payload
+from qa.evaluation import AnswerEvaluation
+from qa.llm_wrapper import GeneratedQuestion
 from qa.loop import QALoop
 from qa.terminal_renderer import TerminalQARenderer
-from tests.test_qa_loop import FakeRenderer, _make_gate_decision, _make_proposal
+from tests.test_qa_loop import FakeRenderer, _install_fake_llm, _make_gate_decision, _make_proposal
 
 # --- Malformed JSON payload ---
+
 
 def test_read_hook_payload_rejects_malformed_json() -> None:
     with pytest.raises(HookPayloadError, match="not valid JSON"):
@@ -35,6 +38,7 @@ def test_read_hook_payload_rejects_non_object_json() -> None:
 
 # --- Empty / missing payload ---
 
+
 def test_read_hook_payload_rejects_empty_string() -> None:
     with pytest.raises(HookPayloadError, match="empty"):
         read_hook_payload("")
@@ -47,16 +51,54 @@ def test_read_hook_payload_rejects_whitespace_only() -> None:
 
 # --- Missing competence model file ---
 
-def test_missing_competence_model_creates_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_missing_competence_model_creates_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """When competence_model.yaml doesn't exist, handle_pre_tool_use creates a default."""
     state_dir = tmp_path / "state"
     competence_path = state_dir / "competence_model.yaml"
     assert not competence_path.exists()
 
+    class FakeGateClient:
+        def create_response(self, *args, **kwargs):
+            del args, kwargs
+            return """{
+  "decision": "block",
+  "reasoning": "Large change requires validation.",
+  "confidence": 0.7,
+  "relevant_concepts": ["python_basics"],
+  "competence_gap": {
+    "size": "medium",
+    "rationale": "Control flow changed."
+  },
+  "prompt_seed": "Explain the assignment mechanism."
+}"""
+
+    class FakeQuestionClient:
+        def generate_question(self, gate_decision, attempt_number, competence_entries=None):
+            del competence_entries
+            return GeneratedQuestion(
+                question=f"Attempt {attempt_number}: explain the mechanism. {gate_decision.qa_packet.prompt_seed}",
+                distractors=[],
+                hint="Think about the mechanism.",
+            )
+
+        def evaluate_answer(self, question, answer, question_type, context_excerpt, attempt_number):
+            del question, answer, question_type, context_excerpt, attempt_number
+            return type("Eval", (), {"passed": True, "feedback": "Good explanation!"})()
+
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: FakeGateClient())
+    from qa import llm_wrapper as llm_wrapper_module
+
+    monkeypatch.setattr(llm_wrapper_module, "_client", FakeQuestionClient())
+
     monkeypatch.setattr(
         TerminalQARenderer,
         "ask",
-        lambda self, q, n, p: "This assigns constants safely without altering control flow semantics.",
+        lambda self, q, n, p: (
+            "This assigns constants safely without altering control flow semantics."
+        ),
     )
 
     handle_pre_tool_use(
@@ -81,6 +123,7 @@ def test_missing_competence_model_creates_default(tmp_path: Path, monkeypatch: p
 
 # --- Blocked gate with no QA packet ---
 
+
 def test_qa_loop_raises_without_qa_packet(tmp_path: Path) -> None:
     gate_decision = GateDecision(
         decision="block",
@@ -103,12 +146,23 @@ def test_qa_loop_raises_without_qa_packet(tmp_path: Path) -> None:
 
 # --- Fail-limit path: verify artifacts and competence decrement ---
 
-def test_fail_limit_path_artifacts_and_competence(tmp_path: Path) -> None:
+
+def test_fail_limit_path_artifacts_and_competence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     state_dir = tmp_path / "state"
     competence_path = tmp_path / "cm.yaml"
     model = default_competence_model()
     initial_score = model.concepts["python_basics"].score
 
+    _install_fake_llm(
+        monkeypatch,
+        [
+            AnswerEvaluation(passed=False, feedback="Nope."),
+            AnswerEvaluation(passed=False, feedback="Still wrong."),
+            AnswerEvaluation(passed=False, feedback="Incorrect."),
+        ],
+    )
     loop = QALoop(renderer=FakeRenderer(["bad", "still bad", "nope"]))
     result = loop.run(
         proposal=_make_proposal("fail-verify"),
@@ -141,6 +195,7 @@ def test_fail_limit_path_artifacts_and_competence(tmp_path: Path) -> None:
 
 # --- Non-mutation bypass: no QA artifacts ---
 
+
 def test_non_mutation_bypass_creates_no_qa_or_agg_artifacts(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
 
@@ -162,6 +217,7 @@ def test_non_mutation_bypass_creates_no_qa_or_agg_artifacts(tmp_path: Path) -> N
 
 # --- Write with completely empty tool_input ---
 
+
 def test_write_with_empty_tool_input_raises(tmp_path: Path) -> None:
     with pytest.raises((HookPayloadError, UnsupportedMutationError)):
         handle_pre_tool_use(
@@ -177,6 +233,7 @@ def test_write_with_empty_tool_input_raises(tmp_path: Path) -> None:
 
 
 # --- Edit with missing old_string ---
+
 
 def test_edit_missing_old_string_raises(tmp_path: Path) -> None:
     with pytest.raises(HookPayloadError):

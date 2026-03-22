@@ -40,6 +40,14 @@ def load_config(path: Path | None = None) -> ProviderConfig:
     return _parse_toml(text)
 
 
+def resolve_provider_config(path: Path | None = None) -> ProviderConfig:
+    """Resolve provider config from env first, then fall back to saved config."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if api_key:
+        return ProviderConfig(api_key=api_key)
+    return load_config(path)
+
+
 def save_config(cfg: ProviderConfig, path: Path | None = None) -> Path:
     """Write provider config to TOML file with restrictive permissions."""
     p = path or _CONFIG_FILE

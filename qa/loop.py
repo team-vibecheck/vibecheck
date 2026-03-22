@@ -49,7 +49,10 @@ class QALoop:
             raise StateValidationError("Blocked gate decisions must include a QA packet.")
 
         if self._explicit_renderer is None and self.auto_select_renderer:
-            renderer = select_renderer(gate_decision.qa_packet.question_type)
+            renderer = select_renderer(
+                gate_decision.qa_packet.question_type,
+                max_attempts=self.max_attempts,
+            )
         else:
             renderer = self.renderer
         assert renderer is not None

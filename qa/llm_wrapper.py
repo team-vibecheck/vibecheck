@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+
 from langchain_openrouter import ChatOpenRouter
 from pydantic import BaseModel, Field
 
+from core.config import resolve_provider_config
 from core.models import GateDecision, QuestionType, RelevantCompetenceEntry
 
 
@@ -29,6 +32,17 @@ class AnswerEvaluationResult(BaseModel):
 
 class LLMQAClient:
     def __init__(self, model: str = "openai/gpt-4o-mini") -> None:
+        try:
+            config = resolve_provider_config()
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'vibecheck auth'."
+            ) from exc
+        if not config.api_key:
+            raise RuntimeError(
+                "OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'vibecheck auth'."
+            )
+        os.environ.setdefault("OPENROUTER_API_KEY", config.api_key)
         self._model = ChatOpenRouter(model=model, temperature=0.3)
 
     def generate_question(
