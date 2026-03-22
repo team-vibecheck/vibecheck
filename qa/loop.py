@@ -12,7 +12,7 @@ from core.models import ChangeProposal, CompetenceModel, GateDecision, QAAttempt
 from qa.competence_updates import apply_qa_outcome
 from qa.evaluation import evaluate_answer
 from qa.question_generation import build_follow_up_question, build_question_prompt
-from qa.terminal_renderer import TerminalQARenderer
+from qa.renderer_selection import select_renderer
 
 
 class QARenderer(Protocol):
@@ -20,9 +20,16 @@ class QARenderer(Protocol):
 
 
 class QALoop:
-    def __init__(self, renderer: QARenderer | None = None, max_attempts: int = 3) -> None:
-        self.renderer = renderer or TerminalQARenderer()
+    def __init__(
+        self,
+        renderer: QARenderer | None = None,
+        max_attempts: int = 3,
+        auto_select_renderer: bool = True,
+    ) -> None:
+        self._explicit_renderer = renderer
+        self.renderer = renderer
         self.max_attempts = max_attempts
+        self.auto_select_renderer = auto_select_renderer
 
     def run(
         self,
@@ -35,6 +42,12 @@ class QALoop:
     ) -> QAResult:
         if gate_decision.qa_packet is None:
             raise StateValidationError("Blocked gate decisions must include a QA packet.")
+
+        if self._explicit_renderer is None and self.auto_select_renderer:
+            renderer = select_renderer(gate_decision.qa_packet.question_type)
+        else:
+            renderer = self.renderer
+        assert renderer is not None
 
         pending_path = state_dir / "qa" / "pending" / f"{proposal.proposal_id}.yaml"
         result_path = state_dir / "qa" / "results" / f"{proposal.proposal_id}.yaml"
@@ -51,7 +64,7 @@ class QALoop:
         attempts: list[QAAttempt] = []
         question = build_question_prompt(gate_decision, attempt_number=1)
         for attempt_number in range(1, self.max_attempts + 1):
-            answer = self.renderer.ask(question, attempt_number, gate_decision.qa_packet)
+            answer = renderer.ask(question, attempt_number, gate_decision.qa_packet)
             evaluation = evaluate_answer(gate_decision.qa_packet.question_type, answer)
             attempts.append(
                 QAAttempt(
