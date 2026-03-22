@@ -130,6 +130,10 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
     from qa import llm_wrapper as llm_wrapper_module
 
     monkeypatch.setattr(llm_wrapper_module, "_client", FakeLLMClient())
+    monkeypatch.setattr(
+        "qa.loop.select_renderer",
+        lambda question_type, max_attempts=3: TerminalQARenderer(max_attempts=max_attempts),
+    )
 
     def fake_ask(
         self: TerminalQARenderer,
@@ -206,6 +210,60 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
         "competence_updated",
         "decision_returned",
     ]
+
+
+def test_pre_tool_use_allows_with_explicit_metadata_when_qa_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "state"
+    mock_client = MagicMock()
+    mock_client.create_response.return_value = """{
+  "decision": "block",
+  "reasoning": "Needs knowledge validation.",
+  "confidence": 0.6,
+  "relevant_concepts": ["python_basics"],
+  "competence_gap": {
+    "size": "high",
+    "rationale": "Large mutation."
+  },
+  "prompt_seed": "Explain this change."
+}"""
+    monkeypatch.setattr("core.gate.OpenRouterClient", lambda: mock_client)
+
+    from qa import loop as loop_module
+
+    def fail_run(self, **kwargs):
+        del self, kwargs
+        raise RuntimeError("Renderer unavailable")
+
+    monkeypatch.setattr(loop_module.QALoop, "run", fail_run)
+
+    response = handle_pre_tool_use(
+        {
+            "tool_name": "Write",
+            "session_id": "session-1",
+            "tool_use_id": "tool-1",
+            "cwd": "/repo",
+            "input": {
+                "path": "core/example.py",
+                "old_content": "value = 1\n",
+                "new_content": "value = 2\n",
+            },
+        },
+        state_dir=state_dir,
+    )
+
+    assert response["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert response["metadata"]["gate_decision"] == "block"
+    assert response["metadata"]["qa_error"] is True
+    assert response["metadata"]["qa_error_type"] == "RuntimeError"
+    assert response["metadata"]["qa_passed"] is None
+
+    events = _read_events(state_dir / "logs" / "events.jsonl")
+    event_names = [e["event"] for e in events]
+    assert "qa_loop_failed" in event_names
+    assert event_names[-1] == "decision_returned"
 
 
 def test_pre_tool_use_raises_for_invalid_mutation_payload(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ class TestMergeHook:
         hook = settings["hooks"]["PreToolUse"][0]
         assert hook["matcher"] == "Edit|Write|MultiEdit"
         assert hook["hooks"][0]["command"] == "python -m hooks.pre_tool_use"
+        assert hook["hooks"][0]["timeout"] == 600
 
     def test_no_duplicate(self) -> None:
         settings: dict = {}

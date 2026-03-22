@@ -106,13 +106,43 @@ def handle_pre_tool_use(
             },
         )
 
-    qa_result = QALoop(event_logger=logger).run(
-        proposal=proposal,
-        gate_decision=gate_decision,
-        competence_model=competence_model,
-        competence_path=competence_path,
-        state_dir=state_dir,
-    )
+    try:
+        qa_result = QALoop(event_logger=logger).run(
+            proposal=proposal,
+            gate_decision=gate_decision,
+            competence_model=competence_model,
+            competence_path=competence_path,
+            state_dir=state_dir,
+        )
+    except Exception as exc:  # noqa: BLE001
+        message = (
+            "QA loop failed to complete; allowing mutation to proceed without"
+            " knowledge-check scoring."
+        )
+        logger.log(
+            "qa_loop_failed",
+            proposal_id=proposal.proposal_id,
+            status="error",
+            details={"error_type": type(exc).__name__, "error": str(exc)},
+        )
+        logger.log(
+            "decision_returned",
+            proposal_id=proposal.proposal_id,
+            status="allow",
+            details={"qa_error": True, "qa_error_type": type(exc).__name__},
+        )
+        return allow_response(
+            message,
+            {
+                "attempt_count": 0,
+                "gate_decision": gate_decision.decision,
+                "proposal_id": proposal.proposal_id,
+                "qa_error": True,
+                "qa_error_type": type(exc).__name__,
+                "qa_passed": None,
+            },
+        )
+
     logger.log(
         "decision_returned",
         proposal_id=proposal.proposal_id,

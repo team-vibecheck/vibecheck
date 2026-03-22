@@ -9,14 +9,20 @@ from __future__ import annotations
 import contextlib
 import importlib
 import importlib.util
+import os
 import queue
+import subprocess
 import sys
+import time
 import threading
+import webbrowser
 from typing import Any
 
 from core.models import QAPacket
 
-_TIMEOUT_SECONDS = 300  # 5 minutes
+_TIMEOUT_SECONDS = 540  # 9 minutes
+_SUBMIT_HANDOFF_SECONDS = 0.75
+_SHUTDOWN_GRACE_SECONDS = 1.0
 
 
 def gradio_available() -> bool:
@@ -40,18 +46,22 @@ class GradioQARenderer:
         result_q: queue.Queue[str] = queue.Queue()
         app = self._build_app(gr, question, attempt_number, packet, result_q)
 
-        server_thread = threading.Thread(
-            target=self._launch_app,
-            args=(app,),
-            daemon=True,
-        )
-        server_thread.start()
+        local_url: str | None = None
+        share_url: str | None = None
+        try:
+            _, local_url, share_url = self._launch_app(app)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Failed to launch Gradio QA UI: {exc}") from exc
+
+        self._announce_urls(local_url, share_url)
+        self._best_effort_open_browser(local_url, share_url)
 
         try:
             answer = result_q.get(timeout=_TIMEOUT_SECONDS)
         except queue.Empty:
             answer = ""
         finally:
+            time.sleep(_SHUTDOWN_GRACE_SECONDS)
             self._close_app(app)
 
         return answer
@@ -109,8 +119,9 @@ class GradioQARenderer:
             def on_submit(answer_text: str) -> str:
                 if not answer_text or not answer_text.strip():
                     return "Please provide an answer before submitting."
-                result_q.put(answer_text.strip())
-                return "Answer submitted. You can close this window."
+                cleaned = answer_text.strip()
+                threading.Timer(_SUBMIT_HANDOFF_SECONDS, lambda: result_q.put(cleaned)).start()
+                return "Answer submitted. Returning to Claude..."
 
             submit_btn.click(
                 fn=on_submit,
@@ -120,12 +131,51 @@ class GradioQARenderer:
 
         return app
 
-    def _launch_app(self, app: Any) -> None:
+    def _launch_app(self, app: Any) -> tuple[Any, str | None, str | None]:
+        return app.launch(
+            share=False,
+            quiet=True,
+            inbrowser=False,
+            prevent_thread_lock=True,
+            server_name="127.0.0.1",
+        )
+
+    def _announce_urls(self, local_url: str | None, share_url: str | None) -> None:
+        print("\nVibeCheck QA web UI launched.", file=sys.stderr)
+        if local_url:
+            print(f"Open local URL: {local_url}", file=sys.stderr)
+        if share_url:
+            print(f"Open share URL: {share_url}", file=sys.stderr)
+        print(
+            "If the browser did not open automatically, copy/paste a URL above.",
+            file=sys.stderr,
+        )
+
+    def _best_effort_open_browser(self, local_url: str | None, share_url: str | None) -> None:
+        target = share_url or local_url
+        if not target:
+            return
+
         with contextlib.suppress(Exception):
-            app.launch(
-                share=False,
-                quiet=True,
-                prevent_thread_lock=True,
+            if webbrowser.open(target, new=1):
+                return
+
+        if _is_wsl():
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    ["wslview", target],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return
+
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                ["xdg-open", target],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
     def _close_app(self, app: Any) -> None:
@@ -135,3 +185,16 @@ class GradioQARenderer:
 
 def _import_gradio() -> Any:
     return importlib.import_module("gradio")
+
+
+def _is_wsl() -> bool:
+    if not sys.platform.startswith("linux"):
+        return False
+    for env_name in ("WSL_DISTRO_NAME", "WSL_INTEROP"):
+        if os.environ.get(env_name):
+            return True
+    try:
+        data = open("/proc/version", encoding="utf-8").read().lower()
+    except OSError:
+        return False
+    return "microsoft" in data

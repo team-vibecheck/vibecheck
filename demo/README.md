@@ -71,6 +71,18 @@ The real deal — launches Claude Code with the VibeCheck hook active. Claude ma
 
 **Expected behavior:** Claude proposes an edit to `calculator.py`. VibeCheck intercepts, evaluates your competence, and asks you a question. You answer in the terminal. If you pass, the edit goes through.
 
+### Step 4 (Manual): Live Claude Code (`step4_manual_claude.sh`)
+Alternative live demo flow that prepares the repo, prints the recommended Claude prompt, and lets you launch Claude Code yourself. This is useful when you want to avoid automating the Claude invocation and handle both Claude interaction and the QA loop manually.
+
+**What it does:**
+- bootstraps the Claude Code hook config with `vibecheck cc init`
+- resets competence to minimum
+- clears prior logs and QA artifacts
+- verifies that `claude` is installed
+- prints the exact directory, Claude command, and prompt to use
+
+**Expected behavior:** You start Claude manually inside `demo/sample_project`, paste the suggested prompt, and answer the QA prompt yourself when VibeCheck blocks the edit.
+
 ## Artifacts to Inspect
 
 After running the demo, check these files:

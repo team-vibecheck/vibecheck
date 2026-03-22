@@ -10,6 +10,7 @@ from pathlib import Path
 from core.competence_store import default_competence_model, save_competence_model
 
 _STATE_SUBDIRS = ["logs", "qa/pending", "qa/results", "agg"]
+_HOOK_TIMEOUT_SECONDS = 600
 
 
 def run_cc_init() -> None:
@@ -78,7 +79,7 @@ def _merge_hook(settings: dict, hook_command: str | None = None) -> None:
                 {
                     "type": "command",
                     "command": command,
-                    "timeout": 30,
+                    "timeout": _HOOK_TIMEOUT_SECONDS,
                 }
             ],
         }
