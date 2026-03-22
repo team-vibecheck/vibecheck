@@ -5,8 +5,10 @@ description = "Competence-aware guardrail scaffold for AI-assisted coding"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "pyyaml>=6.0.3",
+    "langchain-core>=0.3.79",
+    "langchain-openrouter>=0.1.0",
     "openai>=1.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
@@ -31,7 +33,7 @@ pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.pyright]
-include = ["cli", "core", "hooks", "qa", "tests"]
+include = ["cli", "client", "core", "hooks", "qa", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."

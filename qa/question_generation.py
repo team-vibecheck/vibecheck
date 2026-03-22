@@ -11,6 +11,50 @@ def select_question_type(gap_size: str) -> QuestionType:
     return "plain_english"
 
 
+def build_question_prompt(
+    gate_decision: GateDecision,
+    attempt_number: int,
+    competence_entries: list | None = None,
+) -> str:
+    """Build a question prompt using LLM if available, otherwise fall back to local generation."""
+    if gate_decision.qa_packet is None:
+        raise ValueError("Cannot build a question without a QA packet.")
+
+    try:
+        from qa.llm_wrapper import get_llm_client
+
+        client = get_llm_client()
+        generated = client.generate_question(
+            gate_decision=gate_decision,
+            attempt_number=attempt_number,
+            competence_entries=competence_entries,
+        )
+        return generated.question
+    except Exception:
+        return _local_build_prompt(gate_decision, attempt_number)
+
+
+def build_follow_up_question(question: str, feedback: str) -> str:
+    return f"{question}\n\nPrevious feedback: {feedback}"
+
+
+def _local_build_prompt(gate_decision: GateDecision, attempt_number: int) -> str:
+    """Deterministic fallback when LLM is unavailable."""
+    qa_packet = gate_decision.qa_packet
+    if qa_packet is None:
+        raise ValueError("Cannot build a question without a QA packet.")
+
+    sections = [
+        _build_mechanism_intro(attempt_number, qa_packet.question_type),
+        "\n\nChange being evaluated:",
+        f"Seed: {qa_packet.prompt_seed}",
+        "\nCode context:",
+        qa_packet.context_excerpt or "<missing>",
+        _format_competence_hints(gate_decision.relevant_competence_entries),
+    ]
+    return "\n".join(sections)
+
+
 def _build_mechanism_intro(attempt_number: int, question_type: QuestionType) -> str:
     intros = {
         1: {
@@ -47,24 +91,3 @@ def _format_competence_hints(relevant_entries: list) -> str:
     if hints:
         return "\n\nRelevant context:\n" + "\n".join(hints)
     return ""
-
-
-def build_question_prompt(gate_decision: GateDecision, attempt_number: int) -> str:
-    qa_packet = gate_decision.qa_packet
-    if qa_packet is None:
-        raise ValueError("Cannot build a question without a QA packet.")
-
-    sections = [
-        _build_mechanism_intro(attempt_number, qa_packet.question_type),
-        "\n\nChange being evaluated:",
-        f"Seed: {qa_packet.prompt_seed}",
-        "\nCode context:",
-        qa_packet.context_excerpt or "<missing>",
-        _format_competence_hints(gate_decision.relevant_competence_entries),
-    ]
-
-    return "\n".join(sections)
-
-
-def build_follow_up_question(question: str, feedback: str) -> str:
-    return f"{question}\n\nPrevious feedback: {feedback}"

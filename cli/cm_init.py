@@ -12,36 +12,72 @@ if TYPE_CHECKING:
 STATE_DIR = Path("state")
 
 
-def run_cm_init() -> None:
+def run_cm_init(*, preset: str | None = None) -> None:
     output_path = STATE_DIR / "competence_model.yaml"
 
-    if output_path.exists():
-        answer = input(
-            f"Competence model already exists at {output_path}. Overwrite? [y/N] "
-        ).strip()
-        if answer.lower() != "y":
-            print("Aborted.")
-            sys.exit(0)
+    if preset:
+        model = _preset_model(output_path, preset)
+    else:
+        if output_path.exists():
+            answer = input(
+                f"Competence model already exists at {output_path}. Overwrite? [y/N] "
+            ).strip()
+            if answer.lower() != "y":
+                print("Aborted.")
+                sys.exit(0)
 
-    # Try Gradio first, fall back to terminal
-    try:
-        from qa.init_survey import run_gradio_survey
+        # Try Gradio first, fall back to terminal
+        try:
+            from qa.init_survey import run_gradio_survey
 
-        print("Launching competence model survey in your browser...")
-        model = run_gradio_survey(output_path)
-    except RuntimeError:
-        print("Gradio not available — using terminal survey.")
-        model = _terminal_survey(output_path)
+            print("Launching competence model survey in your browser...")
+            model = run_gradio_survey(output_path)
+        except RuntimeError:
+            print("Gradio not available — using terminal survey.")
+            model = _terminal_survey(output_path)
 
     if model is None:
         print("Survey timed out. No changes made.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\nCompetence model saved to {output_path}")
+    print(f"Competence model saved to {output_path}")
     print(f"Concepts initialized: {len(model.concepts)}")
     for name, entry in model.concepts.items():
         label = name.replace("_", " ").title()
         print(f"  {label}: {entry.score:.1f}")
+
+
+def _preset_model(output_path: Path, preset: str) -> CompetenceModel:
+    """Build a competence model with all concepts at max or min scores."""
+    from datetime import UTC, datetime
+
+    from core.competence_store import save_competence_model
+    from core.concept_taxonomy import load_taxonomy
+    from core.models import CompetenceEntry, CompetenceEvidence, CompetenceModel
+
+    score = 0.9 if preset == "max" else 0.1
+    label = "maximum" if preset == "max" else "minimum"
+    concepts = load_taxonomy()
+    now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    entries: dict[str, CompetenceEntry] = {}
+    for concept in concepts:
+        entries[concept.name] = CompetenceEntry(
+            score=score,
+            notes=[],
+            evidence=[
+                CompetenceEvidence(
+                    timestamp=now,
+                    outcome="self_assessment",
+                    note=f"Preset {label} ({score})",
+                )
+            ],
+        )
+
+    model = CompetenceModel(user_id="local_default", updated_at=now, concepts=entries)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    save_competence_model(model, output_path)
+    return model
 
 
 def _terminal_survey(output_path: Path) -> CompetenceModel | None:

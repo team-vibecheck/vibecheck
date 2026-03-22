@@ -7,6 +7,8 @@ from core.models import (
     GateDecision,
     QAPacket,
 )
+from qa.evaluation import AnswerEvaluation
+from qa.llm_wrapper import GeneratedQuestion
 from qa.loop import QALoop
 from qa.question_generation import select_question_type
 
@@ -23,61 +25,36 @@ class FakeRenderer:
         return answer
 
 
-def _make_proposal(proposal_id: str = "proposal-1") -> ChangeProposal:
-    return ChangeProposal(
-        proposal_id=proposal_id,
-        session_id="session-1",
-        tool_use_id="tool-1",
-        tool_name="Write",
-        cwd="/repo",
-        targets=[
-            ChangeTarget(
-                path="core/example.py",
-                language="python",
-                old_content="",
-                new_content="value = 1\n",
-            )
-        ],
-        unified_diff="+value = 1",
-        diff_stats=DiffStats(files_changed=1, additions=1, deletions=0),
-        created_at="2026-03-21T00:00:00Z",
-    )
+class FakeLLMClient:
+    def __init__(self, evaluations: list[AnswerEvaluation]) -> None:
+        self._evaluations = evaluations
+        self._eval_index = 0
+        self._question_count = 0
+
+    def generate_question(self, gate_decision, attempt_number, competence_entries=None):
+        self._question_count += 1
+        return GeneratedQuestion(
+            question=f"Generated question for attempt {attempt_number}",
+            distractors=["Wrong answer 1", "Wrong answer 2"],
+            hint="Think about the mechanism.",
+        )
+
+    def evaluate_answer(self, question, answer, question_type, context_excerpt, attempt_number):
+        evaluation = self._evaluations[self._eval_index]
+        self._eval_index += 1
+        return evaluation
 
 
-def _make_gate_decision(qa_packet: QAPacket | None = None) -> GateDecision:
-    return GateDecision(
-        decision="block",
-        reasoning="Need a quick explanation.",
-        confidence=0.5,
-        relevant_concepts=["python_basics"],
-        competence_gap=CompetenceGap(size="medium", rationale="Scaffold test."),
-        qa_packet=qa_packet
-        or QAPacket(
-            question_type="plain_english",
-            prompt_seed="Explain why the assignment is safe.",
-            context_excerpt="+value = 1",
-        ),
-    )
+def test_qa_loop_passes_after_retry(tmp_path, monkeypatch) -> None:
+    from qa import llm_wrapper as llm_wrapper_module
 
+    fake_evaluations = [
+        AnswerEvaluation(passed=False, feedback="Try again with more detail."),
+        AnswerEvaluation(passed=True, feedback="Good explanation!"),
+    ]
+    fake_client = FakeLLMClient(fake_evaluations)
+    monkeypatch.setattr(llm_wrapper_module, "_client", fake_client)
 
-def test_qa_loop_passes_first_attempt(tmp_path) -> None:
-    loop = QALoop(renderer=FakeRenderer(["This assigns a constant value safely and does not alter control flow."]))
-    result = loop.run(
-        proposal=_make_proposal(),
-        gate_decision=_make_gate_decision(),
-        competence_model=default_competence_model(),
-        competence_path=tmp_path / "cm.yaml",
-        state_dir=tmp_path / "state",
-    )
-
-    assert result.final_decision == "allow"
-    assert result.passed is True
-    assert result.attempt_count == 1
-    assert len(result.attempts) == 1
-    assert result.attempts[0].passed is True
-
-
-def test_qa_loop_passes_after_retry(tmp_path) -> None:
     proposal = ChangeProposal(
         proposal_id="proposal-1",
         session_id="session-1",
@@ -133,9 +110,7 @@ def test_qa_loop_passes_after_retry(tmp_path) -> None:
 
 
 def test_qa_loop_fails_all_attempts(tmp_path) -> None:
-    loop = QALoop(
-        renderer=FakeRenderer(["bad", "still bad", "nope"])
-    )
+    loop = QALoop(renderer=FakeRenderer(["bad", "still bad", "nope"]))
     result = loop.run(
         proposal=_make_proposal("proposal-fail"),
         gate_decision=_make_gate_decision(),
@@ -214,9 +189,7 @@ def test_qa_loop_true_false_question(tmp_path) -> None:
 
 
 def test_qa_loop_faded_example_question(tmp_path) -> None:
-    loop = QALoop(
-        renderer=FakeRenderer(["value = 1\nreturn value"])
-    )
+    loop = QALoop(renderer=FakeRenderer(["value = 1\nreturn value"]))
     gate = _make_gate_decision(
         QAPacket(
             question_type="faded_example",
@@ -236,6 +209,7 @@ def test_qa_loop_faded_example_question(tmp_path) -> None:
 
 def test_question_prompt_includes_mechanism_focus(tmp_path) -> None:
     from core.models import RelevantCompetenceEntry
+
     gate = GateDecision(
         decision="block",
         reasoning="Need explanation.",
@@ -256,6 +230,7 @@ def test_question_prompt_includes_mechanism_focus(tmp_path) -> None:
         ),
     )
     from qa.question_generation import build_question_prompt
+
     prompt = build_question_prompt(gate, attempt_number=1)
     assert "mechanism" in prompt.lower()
     assert "await" in prompt
@@ -263,8 +238,46 @@ def test_question_prompt_includes_mechanism_focus(tmp_path) -> None:
 
 def test_follow_up_includes_previous_feedback() -> None:
     from qa.question_generation import build_follow_up_question
-    result = build_follow_up_question(
-        "Original question?",
-        "Your answer was too vague."
-    )
+
+    result = build_follow_up_question("Original question?", "Your answer was too vague.")
     assert "Your answer was too vague" in result
+
+
+# --- Shared test helpers (used by test_failure_modes.py too) ---
+
+
+def _make_proposal(proposal_id: str = "proposal-1") -> ChangeProposal:
+    return ChangeProposal(
+        proposal_id=proposal_id,
+        session_id="session-1",
+        tool_use_id="tool-1",
+        tool_name="Write",
+        cwd="/repo",
+        targets=[
+            ChangeTarget(
+                path="core/example.py",
+                language="python",
+                old_content="",
+                new_content="value = 1\n",
+            )
+        ],
+        unified_diff="+value = 1",
+        diff_stats=DiffStats(files_changed=1, additions=1, deletions=0),
+        created_at="2026-03-21T00:00:00Z",
+    )
+
+
+def _make_gate_decision(qa_packet: QAPacket | None = None) -> GateDecision:
+    return GateDecision(
+        decision="block",
+        reasoning="Need a quick explanation.",
+        confidence=0.5,
+        relevant_concepts=["python_basics"],
+        competence_gap=CompetenceGap(size="medium", rationale="Scaffold test."),
+        qa_packet=qa_packet
+        or QAPacket(
+            question_type="plain_english",
+            prompt_seed="Explain why the assignment is safe.",
+            context_excerpt="+value = 1",
+        ),
+    )

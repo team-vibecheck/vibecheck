@@ -1,0 +1,10 @@
+{
+  "tool_name": "Write",
+  "session_id": "demo-session-001",
+  "tool_use_id": "demo-tool-001",
+  "cwd": "demo/sample_project",
+  "tool_input": {
+    "file_path": "calculator.py",
+    "content": "\"\"\"A simple calculator module with logging and input validation.\"\"\"\n\nimport logging\n\nlogger = logging.getLogger(__name__)\nlogger.setLevel(logging.DEBUG)\n\n\nclass CalculatorError(Exception):\n    \"\"\"Base exception for calculator errors.\"\"\"\n\n\nclass Calculator:\n    def _validate_numeric(self, *args: object) -> None:\n        for arg in args:\n            if not isinstance(arg, (int, float)):\n                raise TypeError(f\"Expected numeric type, got {type(arg).__name__}\")\n\n    def add(self, a: float, b: float) -> float:\n        self._validate_numeric(a, b)\n        result = a + b\n        logger.info(\"add(%s, %s) = %s\", a, b, result)\n        return result\n\n    def subtract(self, a: float, b: float) -> float:\n        self._validate_numeric(a, b)\n        result = a - b\n        logger.info(\"subtract(%s, %s) = %s\", a, b, result)\n        return result\n\n    def multiply(self, a: float, b: float) -> float:\n        self._validate_numeric(a, b)\n        result = a * b\n        logger.info(\"multiply(%s, %s) = %s\", a, b, result)\n        return result\n\n    def divide(self, a: float, b: float) -> float:\n        self._validate_numeric(a, b)\n        if b == 0:\n            logger.error(\"divide(%s, %s) — division by zero\", a, b)\n            raise ZeroDivisionError(\"Cannot divide by zero\")\n        result = a / b\n        logger.info(\"divide(%s, %s) = %s\", a, b, result)\n        return result\n"
+  }
+}

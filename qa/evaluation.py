@@ -11,7 +11,32 @@ class AnswerEvaluation:
     feedback: str
 
 
-def evaluate_answer(question_type: QuestionType, answer: str) -> AnswerEvaluation:
+def evaluate_answer(
+    question: str,
+    answer: str,
+    question_type: QuestionType,
+    context_excerpt: str,
+    attempt_number: int = 1,
+) -> AnswerEvaluation:
+    """Evaluate an answer using LLM if available, otherwise fall back to heuristics."""
+    try:
+        from qa.llm_wrapper import get_llm_client
+
+        client = get_llm_client()
+        result = client.evaluate_answer(
+            question=question,
+            answer=answer,
+            question_type=question_type,
+            context_excerpt=context_excerpt,
+            attempt_number=attempt_number,
+        )
+        return AnswerEvaluation(passed=result.passed, feedback=result.feedback)
+    except Exception:
+        return _heuristic_evaluate(question_type, answer)
+
+
+def _heuristic_evaluate(question_type: QuestionType, answer: str) -> AnswerEvaluation:
+    """Deterministic fallback when LLM is unavailable."""
     normalized = answer.strip()
     if question_type == "true_false":
         passed = normalized.lower() in {"true", "false"}
