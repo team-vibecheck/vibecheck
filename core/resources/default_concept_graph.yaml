@@ -1,0 +1,23 @@
+concepts:
+  - name: variables_and_types
+    category: fundamentals
+  - name: control_flow
+    category: fundamentals
+  - name: functions
+    category: fundamentals
+    prerequisites: [variables_and_types, control_flow]
+  - name: error_handling
+    category: intermediate
+    prerequisites: [functions]
+  - name: data_structures
+    category: intermediate
+    prerequisites: [variables_and_types]
+  - name: file_io
+    category: intermediate
+    prerequisites: [functions, error_handling]
+  - name: async_programming
+    category: advanced
+    prerequisites: [functions, error_handling]
+  - name: testing
+    category: practices
+    prerequisites: [functions]

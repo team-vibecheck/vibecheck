@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from importlib.resources import files
 from pathlib import Path
 
 import yaml
 
-_DEFAULT_TAXONOMY_PATH = (
-    Path(__file__).resolve().parents[1] / "state" / "default_concept_graph.yaml"
-)
+_DEFAULT_TAXONOMY_RESOURCE = files("core.resources").joinpath("default_concept_graph.yaml")
 
 
 @dataclass(slots=True)
@@ -21,8 +20,12 @@ class ConceptDefinition:
 
 def load_taxonomy(path: Path | None = None) -> list[ConceptDefinition]:
     """Load the concept taxonomy from YAML, returning ordered concept definitions."""
-    p = path or _DEFAULT_TAXONOMY_PATH
-    raw = yaml.safe_load(p.read_text(encoding="utf-8"))
+    raw_text = (
+        path.read_text(encoding="utf-8")
+        if path is not None
+        else _DEFAULT_TAXONOMY_RESOURCE.read_text(encoding="utf-8")
+    )
+    raw = yaml.safe_load(raw_text)
     concepts: list[ConceptDefinition] = []
     for entry in raw.get("concepts", []):
         concepts.append(

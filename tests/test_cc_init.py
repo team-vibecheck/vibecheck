@@ -6,23 +6,24 @@ import json
 from pathlib import Path
 from unittest import mock
 
-from cli.cc_init import _load_or_empty, _merge_hook, run_cc_init
+from cli.cc_init import _hook_command, _load_or_empty, _merge_hook, run_cc_init
 
 
 class TestMergeHook:
     def test_adds_hook_to_empty(self) -> None:
         settings: dict = {}
-        _merge_hook(settings)
+        _merge_hook(settings, "python -m hooks.pre_tool_use")
         assert "hooks" in settings
         assert "PreToolUse" in settings["hooks"]
         assert len(settings["hooks"]["PreToolUse"]) == 1
         hook = settings["hooks"]["PreToolUse"][0]
         assert hook["matcher"] == "Edit|Write|MultiEdit"
+        assert hook["hooks"][0]["command"] == "python -m hooks.pre_tool_use"
 
     def test_no_duplicate(self) -> None:
         settings: dict = {}
-        _merge_hook(settings)
-        _merge_hook(settings)
+        _merge_hook(settings, "python -m hooks.pre_tool_use")
+        _merge_hook(settings, "python -m hooks.pre_tool_use")
         assert len(settings["hooks"]["PreToolUse"]) == 1
 
     def test_preserves_existing_hooks(self) -> None:
@@ -31,9 +32,15 @@ class TestMergeHook:
                 "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "echo done"}]}]
             }
         }
-        _merge_hook(settings)
+        _merge_hook(settings, "python -m hooks.pre_tool_use")
         assert "Stop" in settings["hooks"]
         assert "PreToolUse" in settings["hooks"]
+
+
+class TestHookCommand:
+    def test_uses_current_python_executable(self) -> None:
+        command = _hook_command()
+        assert "hooks.pre_tool_use" in command
 
 
 class TestLoadOrEmpty:
@@ -60,6 +67,7 @@ class TestRunCcInit:
         assert settings_path.exists()
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         assert "PreToolUse" in settings["hooks"]
+        assert "hooks.pre_tool_use" in settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
 
         assert (tmp_path / "state" / "logs").is_dir()
         assert (tmp_path / "state" / "qa" / "pending").is_dir()
