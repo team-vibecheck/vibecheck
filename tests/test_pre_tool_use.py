@@ -22,7 +22,9 @@ def test_pre_tool_use_bypasses_non_mutation_tools(tmp_path: Path) -> None:
 
     assert response["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert "bypassed" in response["hookSpecificOutput"]["permissionDecisionReason"].lower()
-    assert not state_dir.exists()
+    # Event log is created even for bypassed tools, but no QA or agg artifacts
+    assert not (state_dir / "agg").exists()
+    assert not (state_dir / "qa").exists()
 
 
 def test_pre_tool_use_allows_small_write_with_realistic_claude_payload(tmp_path: Path) -> None:
