@@ -5,6 +5,7 @@ description = "Competence-aware guardrail scaffold for AI-assisted coding"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "langchain-core>=0.3.79",
     "pyyaml>=6.0.3",
 ]
 
