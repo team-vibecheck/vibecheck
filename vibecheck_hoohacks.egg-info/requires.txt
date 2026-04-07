@@ -1,9 +1,0 @@
-langchain-core>=0.3.79
-langchain-openrouter>=0.1.0
-pyyaml>=6.0.3
-
-[graph]
-networkx>=3.0
-
-[ui]
-gradio>=5.0

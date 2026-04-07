@@ -13,8 +13,8 @@ import os
 import queue
 import subprocess
 import sys
-import time
 import threading
+import time
 import webbrowser
 from typing import Any
 
@@ -194,7 +194,8 @@ def _is_wsl() -> bool:
         if os.environ.get(env_name):
             return True
     try:
-        data = open("/proc/version", encoding="utf-8").read().lower()
+        with open("/proc/version", encoding="utf-8") as version_file:
+            data = version_file.read().lower()
     except OSError:
         return False
     return "microsoft" in data

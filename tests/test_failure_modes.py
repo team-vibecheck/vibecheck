@@ -92,7 +92,10 @@ def test_missing_competence_model_creates_default(
     from qa import llm_wrapper as llm_wrapper_module
 
     monkeypatch.setattr(llm_wrapper_module, "_client", FakeQuestionClient())
-
+    monkeypatch.setattr(
+        "qa.loop.select_renderer",
+        lambda question_type, max_attempts=3: TerminalQARenderer(max_attempts=max_attempts),
+    )
     monkeypatch.setattr(
         TerminalQARenderer,
         "ask",

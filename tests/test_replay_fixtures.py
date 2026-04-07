@@ -91,6 +91,14 @@ def _install_question_client(
     monkeypatch.setattr(llm_wrapper_module, "_client", FakeQuestionClient())
 
 
+def _install_terminal_renderer(monkeypatch: pytest.MonkeyPatch, answer_fn) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "qa.loop.select_renderer",
+        lambda question_type, max_attempts=3: TerminalQARenderer(max_attempts=max_attempts),
+    )
+    monkeypatch.setattr(TerminalQARenderer, "ask", answer_fn)
+
+
 class TestFixture01SmallWriteAllow:
     def test_gate_allows_small_write(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         fixture = _load_fixture("01_small_write_allow.json")
@@ -141,11 +149,7 @@ class TestFixture02LargeWriteBlockPass:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[True])
 
-        monkeypatch.setattr(
-            TerminalQARenderer,
-            "ask",
-            lambda self, q, n, p: fake_answer,
-        )
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: fake_answer)
 
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -161,9 +165,8 @@ class TestFixture02LargeWriteBlockPass:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[True])
 
-        monkeypatch.setattr(
-            TerminalQARenderer,
-            "ask",
+        _install_terminal_renderer(
+            monkeypatch,
             lambda self, q, n, p: fixture["_fake_answer"],
         )
 
@@ -185,9 +188,8 @@ class TestFixture02LargeWriteBlockPass:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[True])
 
-        monkeypatch.setattr(
-            TerminalQARenderer,
-            "ask",
+        _install_terminal_renderer(
+            monkeypatch,
             lambda self, q, n, p: fixture["_fake_answer"],
         )
 
@@ -205,11 +207,7 @@ class TestFixture03LargeWriteBlockFailLimit:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
-        monkeypatch.setattr(
-            TerminalQARenderer,
-            "ask",
-            lambda self, q, n, p: next(answers),
-        )
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: next(answers))
 
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -226,11 +224,7 @@ class TestFixture03LargeWriteBlockFailLimit:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
-        monkeypatch.setattr(
-            TerminalQARenderer,
-            "ask",
-            lambda self, q, n, p: next(answers),
-        )
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: next(answers))
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -247,11 +241,7 @@ class TestFixture03LargeWriteBlockFailLimit:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
-        monkeypatch.setattr(
-            TerminalQARenderer,
-            "ask",
-            lambda self, q, n, p: next(answers),
-        )
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: next(answers))
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 

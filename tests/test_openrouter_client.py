@@ -116,6 +116,7 @@ def test_complete_text_reads_nested_output_blocks(monkeypatch: pytest.MonkeyPatc
 
 def test_client_raises_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("core.config._CONFIG_FILE", Path("/definitely/missing/config.toml"))
 
     with pytest.raises(OpenRouterClientError, match="OpenRouter credentials are required"):
         OpenRouterClient()
