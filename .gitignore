@@ -7,3 +7,16 @@ __pycache__/
 !.env.example
 .DS_Store
 .vscode/
+.claude/
+
+dist/
+*.egg-info/
+
+state/competence_model.yaml
+state/agg/
+state/logs/
+state/qa/pending/*.yaml
+state/qa/results/*.yaml
+
+demo/sample_project/.claude/
+demo/sample_project/state/
