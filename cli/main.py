@@ -34,7 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     # vibecheck cc <subcommand>
     cc_parser = subparsers.add_parser("cc", help="Claude Code integration")
     cc_sub = cc_parser.add_subparsers(dest="cc_command")
-    cc_sub.add_parser("init", help="Bootstrap Claude Code hook configuration")
+    cc_init_parser = cc_sub.add_parser("init", help="Bootstrap Claude Code hook configuration")
+    cc_init_parser.add_argument(
+        "--target-dir",
+        help="Write .claude/settings.json and state directories into this directory",
+    )
 
     return parser
 
@@ -66,7 +70,7 @@ def main(argv: list[str] | None = None) -> None:
         elif args.cc_command == "init":
             from cli.cc_init import run_cc_init
 
-            run_cc_init()
+            run_cc_init(target_dir=getattr(args, "target_dir", None))
 
     else:
         parser.print_help()

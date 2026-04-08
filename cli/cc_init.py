@@ -6,6 +6,7 @@ import json
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 from core.competence_store import default_competence_model, save_competence_model
 
@@ -13,12 +14,13 @@ _STATE_SUBDIRS = ["logs", "qa/pending", "qa/results", "agg"]
 _HOOK_TIMEOUT_SECONDS = 600
 
 
-def run_cc_init() -> None:
-    project_root = Path.cwd()
+def run_cc_init(*, target_dir: str | None = None) -> None:
+    source_root = Path(__file__).resolve().parents[1]
+    project_root = Path(target_dir).resolve() if target_dir else Path.cwd()
     claude_dir = project_root / ".claude"
     settings_path = claude_dir / "settings.json"
     state_dir = project_root / "state"
-    hook_command = _hook_command()
+    hook_command = _hook_command(source_root)
 
     # 1. Create/merge .claude/settings.json
     claude_dir.mkdir(exist_ok=True)
@@ -55,21 +57,31 @@ def _load_or_empty(path: Path) -> dict:
     return {}
 
 
-def _hook_command() -> str:
-    return f"{shlex.quote(sys.executable)} -m hooks.pre_tool_use"
+def _hook_command(source_root: Path | None = None) -> str:
+    root = source_root or Path(__file__).resolve().parents[1]
+    return (
+        "sh -lc "
+        f"'cd {shlex.quote(str(root))} && "
+        f"{shlex.quote(sys.executable)} -m hooks.pre_tool_use'"
+    )
 
 
 def _merge_hook(settings: dict, hook_command: str | None = None) -> None:
     """Add the VibeCheck PreToolUse hook without clobbering existing hooks."""
     command = hook_command or _hook_command()
     hooks = settings.setdefault("hooks", {})
-    pre_tool_use: list = hooks.setdefault("PreToolUse", [])
+    pre_tool_use: list[dict[str, Any]] = hooks.setdefault("PreToolUse", [])
 
     # Check if a vibecheck hook already exists
     for entry in pre_tool_use:
         entry_hooks = entry.get("hooks", [])
         for h in entry_hooks:
-            if "hooks.pre_tool_use" in h.get("command", "") or h.get("command", "") == command:
+            existing_command = h.get("command", "")
+            if (
+                "hooks.pre_tool_use" in existing_command
+                or "pre_tool_use.py" in existing_command
+                or existing_command == command
+            ):
                 return  # Already configured
 
     pre_tool_use.append(
