@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
@@ -29,12 +30,14 @@ class QALoop:
         max_attempts: int = 3,
         auto_select_renderer: bool = True,
         event_logger: EventLogger | None = None,
+        chroma_collection: Any | None = None,
     ) -> None:
         self._explicit_renderer = renderer
         self.renderer = renderer
         self.max_attempts = max_attempts
         self.auto_select_renderer = auto_select_renderer
         self._logger = event_logger
+        self._chroma_collection = chroma_collection
 
     def run(
         self,
@@ -56,6 +59,12 @@ class QALoop:
         else:
             renderer = self.renderer
         assert renderer is not None
+
+        chroma_col = self._chroma_collection
+        if chroma_col is None:
+            from core.competence_store import get_chroma_collection
+
+            chroma_col = get_chroma_collection(state_dir / "chroma_db")
 
         pending_path = state_dir / "qa" / "pending" / f"{proposal.proposal_id}.yaml"
         result_path = state_dir / "qa" / "results" / f"{proposal.proposal_id}.yaml"
@@ -133,6 +142,7 @@ class QALoop:
                     attempts=attempts,
                     summary="QA loop passed; allowing the suspended mutation to continue.",
                 )
+                _save_qa_outcome_to_chroma(chroma_col, proposal, gate_decision, result)
                 _write_yaml(result_path, _result_payload(result))
                 return result
 
@@ -158,6 +168,7 @@ class QALoop:
             attempts=attempts,
             summary="QA loop reached the fail limit; allowing the mutation with a competence penalty.",
         )
+        _save_qa_outcome_to_chroma(chroma_col, proposal, gate_decision, result)
         _write_yaml(result_path, _result_payload(result))
         return result
 
@@ -185,6 +196,50 @@ def _try_show_feedback(renderer: object, feedback: str, *, passed: bool) -> None
 def _try_show_outcome(renderer: object, *, passed: bool, attempt_count: int) -> None:
     if hasattr(renderer, "show_outcome"):
         renderer.show_outcome(passed=passed, attempt_count=attempt_count)  # type: ignore[union-attr]
+
+
+def _save_qa_outcome_to_chroma(
+    collection: Any,
+    proposal: ChangeProposal,
+    gate_decision: GateDecision,
+    result: QAResult,
+) -> None:
+    first_target = proposal.targets[0] if proposal.targets else None
+    file_path = first_target.path if first_target else ""
+    language = (first_target.language or "") if first_target else ""
+
+    concepts_str = ", ".join(gate_decision.relevant_concepts) if gate_decision.relevant_concepts else "general"
+
+    if result.passed:
+        event_type = "user_correction"
+        lesson = (
+            f"User demonstrated understanding of {concepts_str} after "
+            f"{result.attempt_count} attempt(s)."
+        )
+    else:
+        event_type = "qa_fail"
+        lesson = (
+            f"User failed to demonstrate understanding of {concepts_str} after "
+            f"{result.attempt_count} attempt(s). Epistemic debt recorded."
+        )
+
+    document = (
+        f"Change to {file_path} ({language}). "
+        f"Gate reasoning: {gate_decision.reasoning} "
+        f"Lesson: {lesson}"
+    )
+    metadata: dict[str, object] = {
+        "timestamp": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "event_type": event_type,
+        "file_path": file_path,
+        "language": language,
+        "qa_pass": result.passed,
+    }
+    collection.add(
+        documents=[document],
+        metadatas=[metadata],
+        ids=[result.proposal_id],
+    )
 
 
 def _write_yaml(path: Path, payload: dict[str, object]) -> None:

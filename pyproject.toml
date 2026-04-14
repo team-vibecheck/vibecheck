@@ -22,8 +22,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+    "chromadb>=1.5.7",
     "langchain-core>=0.3.79",
     "langchain-openrouter>=0.1.0",
+    "openai>=2.31.0",
     "pyyaml>=6.0.3",
 ]
 

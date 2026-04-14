@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -95,6 +97,35 @@ def default_competence_model() -> CompetenceModel:
                 evidence=[],
             )
         },
+    )
+
+
+def get_chroma_collection(
+    db_path: Path,
+    embedding_function: Any | None = None,
+) -> Any:
+    """Return a persistent ChromaDB collection for competence events.
+
+    Uses OpenAI text-embedding-3-small by default.  Pass a custom
+    ``embedding_function`` (any chromadb-compatible callable) to override —
+    useful in tests to avoid hitting the OpenAI API.
+    """
+    import chromadb
+    from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+    db_path.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(db_path))
+
+    if embedding_function is None:
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        embedding_function = OpenAIEmbeddingFunction(
+            api_key=api_key,
+            model_name="text-embedding-3-small",
+        )
+
+    return client.get_or_create_collection(
+        name="competence_events",
+        embedding_function=embedding_function,
     )
 
 
