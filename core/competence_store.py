@@ -100,6 +100,47 @@ def default_competence_model() -> CompetenceModel:
     )
 
 
+def retrieve_relevant_events(
+    file_path: str,
+    proposed_diff: str,
+    *,
+    db_path: Path,
+    embedding_function: Any | None = None,
+    n_results: int = 3,
+) -> list[dict[str, Any]]:
+    """Semantic search over past QA outcomes, filtered to the given file path.
+
+    Returns up to ``n_results`` entries from the ``competence_events``
+    collection whose ``file_path`` metadata matches the supplied value.
+    The search text is the ``proposed_diff``, so results are ranked by how
+    semantically similar past events are to the current change.
+
+    Returns an empty list when the collection is empty or no matching
+    events exist — never raises.
+    """
+    collection = get_chroma_collection(db_path, embedding_function)
+
+    try:
+        total = collection.count()
+        if total == 0:
+            return []
+
+        result = collection.query(
+            query_texts=[proposed_diff],
+            n_results=min(n_results, total),
+            where={"file_path": file_path},
+        )
+    except Exception:  # noqa: BLE001 — retrieval must not crash the hook
+        return []
+
+    docs: list[str] = (result.get("documents") or [[]])[0] or []
+    metas: list[dict[str, Any]] = (result.get("metadatas") or [[]])[0] or []
+    return [
+        {"document": doc, "metadata": meta or {}}
+        for doc, meta in zip(docs, metas)
+    ]
+
+
 def get_chroma_collection(
     db_path: Path,
     embedding_function: Any | None = None,

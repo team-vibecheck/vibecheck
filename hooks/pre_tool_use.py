@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.competence_store import load_competence_model
+from core.competence_store import load_competence_model, retrieve_relevant_events
 from core.context_aggregation import build_aggregated_context
 from core.errors import VibeCheckError
 from core.event_logger import EventLogger
@@ -72,6 +72,14 @@ def handle_pre_tool_use(
         details={"files_changed": proposal.diff_stats.files_changed},
     )
 
+    first_path = proposal.targets[0].path if proposal.targets else ""
+    historical_events = retrieve_relevant_events(
+        first_path,
+        proposal.unified_diff,
+        db_path=state_dir / "chroma_db",
+    )
+    historical_context = _format_historical_events(historical_events)
+
     aggregated_context = build_aggregated_context(
         proposal,
         state_dir,
@@ -80,8 +88,13 @@ def handle_pre_tool_use(
         surrounding_code=_optional_text(payload, "surrounding_code")
         or _derive_surrounding_code(proposal),
         repo_notes=repo_notes,
+        historical_context=historical_context,
     )
-    logger.log("context_aggregated", proposal_id=proposal.proposal_id)
+    logger.log(
+        "context_aggregated",
+        proposal_id=proposal.proposal_id,
+        details={"rag_event_count": len(historical_events)},
+    )
 
     competence_path = state_dir / "competence_model.yaml"
     competence_model = load_competence_model(competence_path)
@@ -175,6 +188,22 @@ def main() -> None:
 def _optional_text(payload: Mapping[str, Any], key: str) -> str:
     value = payload.get(key)
     return value if isinstance(value, str) else ""
+
+
+def _format_historical_events(events: list[dict[str, Any]]) -> str:
+    if not events:
+        return "<none>"
+    lines: list[str] = []
+    for i, event in enumerate(events, 1):
+        meta = event.get("metadata", {})
+        lines.append(f"### Past Event {i}")
+        lines.append(f"- file_path: {meta.get('file_path', '')}")
+        lines.append(f"- event_type: {meta.get('event_type', '')}")
+        lines.append(f"- timestamp: {meta.get('timestamp', '')}")
+        lines.append(f"- qa_pass: {meta.get('qa_pass', '')}")
+        lines.append(f"- lesson: {event.get('document', '')}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _derive_surrounding_code(payload: ChangeProposal) -> str:

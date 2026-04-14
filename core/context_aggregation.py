@@ -13,6 +13,7 @@ def build_aggregated_context(
     transcript_excerpt: str = "",
     surrounding_code: str = "",
     repo_notes: str = "",
+    historical_context: str = "",
 ) -> AggregatedContext:
     artifact_path = state_dir / "agg" / "current_attempt.md"
     markdown = render_aggregated_context(
@@ -21,6 +22,7 @@ def build_aggregated_context(
         transcript_excerpt=transcript_excerpt,
         surrounding_code=surrounding_code,
         repo_notes=repo_notes,
+        historical_context=historical_context,
     )
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(markdown, encoding="utf-8")
@@ -38,6 +40,7 @@ def render_aggregated_context(
     transcript_excerpt: str,
     surrounding_code: str,
     repo_notes: str,
+    historical_context: str = "",
 ) -> str:
     old_code = "\n\n".join(target.old_content or "<new file>" for target in proposal.targets)
     new_code = "\n\n".join(target.new_content for target in proposal.targets)
@@ -87,5 +90,8 @@ def render_aggregated_context(
             "",
             "## Repo-Local Notes",
             repo_notes or "<none>",
+            "",
+            "## Historical Competence Events",
+            historical_context or "<none>",
         ]
     )
