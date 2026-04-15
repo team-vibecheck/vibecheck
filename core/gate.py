@@ -62,7 +62,11 @@ class KnowledgeGate:
         system_prompt = (
             "You are the Knowledge gate. "
             "Analyze proposed code changes versus user competence and return strict JSON only. "
-            "Never include markdown, prose before JSON, or code fences."
+            "Never include markdown, prose before JSON, or code fences. "
+            "You have access to previous mistakes and learned rules for this specific codebase "
+            "and file. You MUST evaluate the proposed code change against these historical "
+            "lessons. If the proposed change repeats a past mistake found in the retrieved "
+            "history, you must BLOCK the change."
         )
         user_prompt = "\n\n".join(
             [
@@ -93,6 +97,9 @@ class KnowledgeGate:
                 "- If decision is allow, still provide low/medium/high gap and rationale.",
                 "- Choose relevant concepts from the provided competence concepts or infer plausible ones.",
                 "- prompt_seed should be a concise mechanism-focused QA seed.",
+                "- The aggregated context above contains a '## Historical Competence Events' section.",
+                "  Review it carefully. If any past event describes a mistake that matches or closely",
+                "  resembles the current proposed change, you MUST set decision to 'block'.",
                 "Formatting requirements:",
                 format_instructions,
             ]

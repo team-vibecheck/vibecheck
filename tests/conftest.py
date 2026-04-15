@@ -2,19 +2,34 @@ from __future__ import annotations
 
 import chromadb
 import pytest
+from chromadb import EmbeddingFunction
+from chromadb.api.types import Documents, Embeddings
 
 
-class _FakeEmbeddingFunction:
-    """Minimal embedding function stub for tests that avoids any network calls."""
+class _FakeEmbeddingFunction(EmbeddingFunction[Documents]):
+    """Minimal embedding function stub for tests that avoids any network calls.
 
-    def __call__(self, input: list[str]) -> list[list[float]]:
+    Must subclass EmbeddingFunction so chromadb 1.5.x can call embed_query()
+    on it during collection.query() — the base class provides that method as
+    a delegate to __call__.
+    """
+
+    def __init__(self) -> None:
+        pass  # suppress DeprecationWarning from base __init__
+
+    def __call__(self, input: Documents) -> Embeddings:
         return [[0.0] * 8 for _ in input]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "fake"
 
-    def is_legacy(self) -> bool:
-        return False
+    def get_config(self) -> dict:  # type: ignore[override]
+        return {}
+
+    @staticmethod
+    def build_from_config(config: dict) -> "_FakeEmbeddingFunction":  # type: ignore[override]
+        return _FakeEmbeddingFunction()
 
 
 @pytest.fixture(autouse=True)

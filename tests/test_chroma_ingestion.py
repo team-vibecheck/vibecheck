@@ -15,17 +15,33 @@ from qa.evaluation import AnswerEvaluation
 from qa.loop import QALoop
 
 
-class _FakeEmbeddingFunction:
-    """Avoids network calls to OpenAI in tests."""
+from chromadb import EmbeddingFunction
+from chromadb.api.types import Documents, Embeddings
 
-    def __call__(self, input: list[str]) -> list[list[float]]:
+
+class _FakeEmbeddingFunction(EmbeddingFunction[Documents]):
+    """Avoids network calls to OpenAI in tests.
+
+    Properly subclasses EmbeddingFunction so chromadb 1.5.x can call
+    embed_query() during collection.query().
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    def __call__(self, input: Documents) -> Embeddings:
         return [[0.0] * 8 for _ in input]
 
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return "fake"
 
-    def is_legacy(self) -> bool:
-        return False
+    def get_config(self) -> dict:  # type: ignore[override]
+        return {}
+
+    @staticmethod
+    def build_from_config(config: dict) -> "_FakeEmbeddingFunction":  # type: ignore[override]
+        return _FakeEmbeddingFunction()
 
 
 def _ephemeral_collection() -> chromadb.Collection:
