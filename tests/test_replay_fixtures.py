@@ -149,7 +149,7 @@ class TestFixture02LargeWriteBlockPass:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[True])
 
-        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: fake_answer)
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p, **kwargs: fake_answer)
 
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -167,7 +167,7 @@ class TestFixture02LargeWriteBlockPass:
 
         _install_terminal_renderer(
             monkeypatch,
-            lambda self, q, n, p: fixture["_fake_answer"],
+            lambda self, q, n, p, **kwargs: fixture["_fake_answer"],
         )
 
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
@@ -190,7 +190,7 @@ class TestFixture02LargeWriteBlockPass:
 
         _install_terminal_renderer(
             monkeypatch,
-            lambda self, q, n, p: fixture["_fake_answer"],
+            lambda self, q, n, p, **kwargs: fixture["_fake_answer"],
         )
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
@@ -207,7 +207,7 @@ class TestFixture03LargeWriteBlockFailLimit:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
-        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: next(answers))
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p, **kwargs: next(answers))
 
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -224,7 +224,7 @@ class TestFixture03LargeWriteBlockFailLimit:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
-        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: next(answers))
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p, **kwargs: next(answers))
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -241,7 +241,7 @@ class TestFixture03LargeWriteBlockFailLimit:
         _install_gate_client(monkeypatch, decision="block")
         _install_question_client(monkeypatch, passed_sequence=[False, False, False])
 
-        _install_terminal_renderer(monkeypatch, lambda self, q, n, p: next(answers))
+        _install_terminal_renderer(monkeypatch, lambda self, q, n, p, **kwargs: next(answers))
 
         handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
@@ -269,7 +269,8 @@ class TestFixture05NonMutationBypass:
         response = handle_pre_tool_use(_strip_meta(fixture), state_dir=state_dir)
 
         assert response["hookSpecificOutput"]["permissionDecision"] == "allow"
-        assert "bypassed" in response["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        reason_lower = response["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        assert "bypass" in reason_lower
 
     def test_no_gate_artifacts(self, tmp_path: Path) -> None:
         fixture = _load_fixture("05_non_mutation_bypass.json")

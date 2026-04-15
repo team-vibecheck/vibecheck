@@ -17,6 +17,8 @@ state/agg/
 state/logs/
 state/qa/pending/*.yaml
 state/qa/results/*.yaml
+state/qa/sidecar.pid
+state/qa/sidecar.port
 
 demo/sample_project/.claude/
 demo/sample_project/state/

@@ -1,26 +1,19 @@
 from __future__ import annotations
 
-import pytest
-
-from qa.gradio_renderer import GradioQARenderer
 from qa.renderer_selection import select_renderer
+from qa.sidecar import SidecarClient
 
 
-def test_select_renderer_requires_gradio(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("qa.renderer_selection.gradio_available", lambda: False)
-    with pytest.raises(RuntimeError, match="Gradio is required"):
-        select_renderer("plain_english")
-
-
-def test_select_renderer_uses_gradio_for_plain_english(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("qa.renderer_selection.gradio_available", lambda: True)
+def test_select_renderer_returns_sidecar_client() -> None:
     renderer = select_renderer("plain_english")
-    assert isinstance(renderer, GradioQARenderer)
+    assert isinstance(renderer, SidecarClient)
 
 
-def test_select_renderer_uses_gradio_for_true_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("qa.renderer_selection.gradio_available", lambda: True)
+def test_select_renderer_returns_sidecar_for_true_false() -> None:
     renderer = select_renderer("true_false")
-    assert isinstance(renderer, GradioQARenderer)
+    assert isinstance(renderer, SidecarClient)
+
+
+def test_select_renderer_returns_sidecar_for_faded_example() -> None:
+    renderer = select_renderer("faded_example")
+    assert isinstance(renderer, SidecarClient)

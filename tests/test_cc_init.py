@@ -42,13 +42,13 @@ class TestMergeHook:
 
 class TestHookCommand:
     def test_uses_current_python_executable(self) -> None:
-        command = _hook_command()
+        command = _hook_command(module="hooks.pre_tool_use")
         assert "hooks.pre_tool_use" in command
 
     def test_can_target_repo_root_from_other_directory(self) -> None:
         source_root = Path("/repo")
 
-        command = _hook_command(source_root)
+        command = _hook_command(source_root=source_root, module="hooks.pre_tool_use")
 
         assert command.startswith("sh -lc '")
         assert shlex.quote(str(source_root)) in command
@@ -80,6 +80,16 @@ class TestRunCcInit:
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         assert "PreToolUse" in settings["hooks"]
         assert "hooks.pre_tool_use" in settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        assert "SessionStart" in settings["hooks"]
+        assert "hooks.session_start" in settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        assert settings["hooks"]["SessionStart"][0]["matcher"] == "startup|resume"
+        assert "UserPromptSubmit" in settings["hooks"]
+        assert (
+            "hooks.user_prompt_submit"
+            in settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        )
+        assert "SessionEnd" in settings["hooks"]
+        assert "hooks.session_end" in settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
 
         assert (tmp_path / "state" / "logs").is_dir()
         assert (tmp_path / "state" / "qa" / "pending").is_dir()
@@ -100,5 +110,11 @@ class TestRunCcInit:
         command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         assert shlex.quote(str(Path(__file__).resolve().parents[1])) in command
         assert "hooks.pre_tool_use" in command
+        start_command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        end_command = settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
+        prompt_command = settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        assert "hooks.session_start" in start_command
+        assert "hooks.session_end" in end_command
+        assert "hooks.user_prompt_submit" in prompt_command
         assert state_dir.joinpath("logs").is_dir()
         assert state_dir.joinpath("competence_model.yaml").exists()

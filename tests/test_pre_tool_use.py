@@ -9,6 +9,7 @@ import yaml
 from core.errors import HookPayloadError, UnsupportedMutationError
 from hooks.pre_tool_use import handle_pre_tool_use
 from qa.llm_wrapper import GeneratedQuestion
+from qa.sidecar.presence import get_presence_snapshot
 from qa.terminal_renderer import TerminalQARenderer
 
 
@@ -26,7 +27,9 @@ def test_pre_tool_use_bypasses_non_mutation_tools(tmp_path: Path) -> None:
     )
 
     assert response["hookSpecificOutput"]["permissionDecision"] == "allow"
-    assert "bypassed" in response["hookSpecificOutput"]["permissionDecisionReason"].lower()
+    assert "VibeCheck" in response["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "bypass" in response["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "Bash" in response["hookSpecificOutput"]["permissionDecisionReason"]
     # Event log is created even for bypassed tools, but no QA or agg artifacts
     assert not (state_dir / "agg").exists()
     assert not (state_dir / "qa").exists()
@@ -79,6 +82,9 @@ def test_pre_tool_use_allows_small_write_with_realistic_claude_payload(
 
     assert response["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert response["metadata"]["gate_decision"] == "allow"
+    reason = response["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "VibeCheck" in reason
+    assert "gate=allow" in reason
     assert "Please rename the variable." in aggregated_context
     assert "assistant: I will update the file." in aggregated_context
     assert "Repository note for hook tests." in aggregated_context
@@ -93,6 +99,11 @@ def test_pre_tool_use_allows_small_write_with_realistic_claude_payload(
     assert "decision_returned" in event_names
     # No QA events in allow flow
     assert "qa_attempt_started" not in event_names
+
+    presence = get_presence_snapshot(state_dir=state_dir)
+    active = presence["active_session"]
+    assert isinstance(active, dict)
+    assert active["state"] == "gate_allow"
 
 
 def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
@@ -140,8 +151,12 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
         question: str,
         attempt_number: int,
         packet: object,
+        *,
+        session_id: str = "",
+        proposal_id: str = "",
+        tool_use_id: str = "",
     ) -> str:
-        del self, question, attempt_number, packet
+        del self, question, attempt_number, packet, session_id, proposal_id, tool_use_id
         return (
             "This change assigns several constants safely without altering control flow semantics."
         )
@@ -176,6 +191,11 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
     assert response["metadata"]["gate_decision"] == "block"
     assert response["metadata"]["qa_passed"] is True
     assert response["metadata"]["attempt_count"] == 1
+    reason = response["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "VibeCheck" in reason
+    assert "gate=block" in reason
+    assert "qa=passed" in reason
+    assert "attempt=1" in reason
     assert result_artifact.exists()
     assert "pass_first_try" in competence_text
 
@@ -202,6 +222,7 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
     event_names = [e["event"] for e in events]
     assert event_names == [
         "hook_payload_received",
+        "sidecar_lease_heartbeat",
         "mutation_normalized",
         "context_aggregated",
         "gate_decision_made",
@@ -210,6 +231,11 @@ def test_pre_tool_use_runs_blocked_flow_and_persists_qa_artifacts(
         "competence_updated",
         "decision_returned",
     ]
+
+    presence = get_presence_snapshot(state_dir=state_dir)
+    active = presence["active_session"]
+    assert isinstance(active, dict)
+    assert active["state"] == "qa_pass"
 
 
 def test_pre_tool_use_allows_with_explicit_metadata_when_qa_fails(
@@ -259,6 +285,11 @@ def test_pre_tool_use_allows_with_explicit_metadata_when_qa_fails(
     assert response["metadata"]["qa_error"] is True
     assert response["metadata"]["qa_error_type"] == "RuntimeError"
     assert response["metadata"]["qa_passed"] is None
+    reason = response["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "VibeCheck" in reason
+    assert "gate=block" in reason
+    assert "qa=error(RuntimeError)" in reason
+    assert "fail-open" in reason
 
     events = _read_events(state_dir / "logs" / "events.jsonl")
     event_names = [e["event"] for e in events]

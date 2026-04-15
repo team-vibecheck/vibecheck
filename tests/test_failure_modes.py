@@ -99,7 +99,7 @@ def test_missing_competence_model_creates_default(
     monkeypatch.setattr(
         TerminalQARenderer,
         "ask",
-        lambda self, q, n, p: (
+        lambda self, q, n, p, **kwargs: (
             "This assigns constants safely without altering control flow semantics."
         ),
     )

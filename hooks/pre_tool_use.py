@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,8 +29,40 @@ from hooks.stdin_payload import (
     read_hook_payload,
 )
 from qa.loop import QALoop
+from qa.sidecar.leases import heartbeat_lease, prune_stale_leases
+from qa.sidecar.presence import set_session_state
 
-STATE_DIR = Path("state")
+STATE_DIR = Path(os.environ.get("VIBECHECK_STATE_DIR", "state"))
+
+
+def _status_reason(
+    gate_decision: str,
+    *,
+    confidence: float | None = None,
+    qa_passed: bool | None = None,
+    qa_error: bool = False,
+    error_type: str | None = None,
+    attempt_count: int = 0,
+    max_attempts: int = 3,
+    bypass_tool: str | None = None,
+) -> str:
+    if bypass_tool:
+        return f"VibeCheck: bypass (non-mutation: {bypass_tool})"
+
+    if gate_decision == "allow":
+        conf_str = f" (confidence={confidence:.2f})" if confidence is not None else ""
+        return f"VibeCheck: gate=allow{conf_str}"
+
+    if qa_error and error_type:
+        return f"VibeCheck: gate=block, qa=error({error_type}), fail-open"
+
+    if qa_passed is not None:
+        ok = "passed" if qa_passed else "failed"
+        if not qa_passed:
+            return f"VibeCheck: gate=block, qa={ok} (attempts={attempt_count}/{max_attempts}), policy=allow"
+        return f"VibeCheck: gate=block, qa={ok} (attempt={attempt_count}/{max_attempts})"
+
+    return "VibeCheck: gate=block"
 
 
 def handle_pre_tool_use(
@@ -46,10 +79,29 @@ def handle_pre_tool_use(
 
     if not is_code_mutation_tool(tool_name):
         logger.log("non_mutation_bypass", tool_name=logged_tool_name, status="allow")
+        reason = _status_reason("", bypass_tool=tool_name or "unknown")
         return allow_response(
-            "Non-mutation tool call bypassed by VibeCheck.",
+            reason,
             {"tool_name": tool_name},
         )
+
+    session_id = _optional_text(payload, "session_id")
+    set_session_state(
+        session_id,
+        "gate_thinking",
+        state_dir=state_dir,
+        detail="Evaluating mutation in knowledge gate",
+    )
+    heartbeat = heartbeat_lease(session_id, source="PreToolUse", state_dir=state_dir)
+    pruned_sessions = prune_stale_leases(state_dir=state_dir)
+    logger.log(
+        "sidecar_lease_heartbeat",
+        session_id=session_id,
+        details={
+            "active_leases": heartbeat.get("active_count", 0),
+            "stale_pruned": len(pruned_sessions),
+        },
+    )
 
     cwd = get_cwd(payload)
     transcript_excerpt = _optional_text(
@@ -85,7 +137,30 @@ def handle_pre_tool_use(
 
     competence_path = state_dir / "competence_model.yaml"
     competence_model = load_competence_model(competence_path)
-    gate_decision = evaluate_change(proposal, aggregated_context, competence_model)
+
+    try:
+        gate_decision = evaluate_change(proposal, aggregated_context, competence_model)
+    except Exception as exc:  # noqa: BLE001
+        error_type = type(exc).__name__
+        logger.log(
+            "gate_evaluation_failed",
+            proposal_id=proposal.proposal_id,
+            status="error",
+            details={"error_type": error_type, "error": str(exc)},
+        )
+        reason = _status_reason("allow", confidence=0.0, qa_error=True, error_type=error_type)
+        logger.log("decision_returned", proposal_id=proposal.proposal_id, status="allow")
+        return allow_response(
+            reason,
+            {
+                "proposal_id": proposal.proposal_id,
+                "gate_decision": "error",
+                "gate_error": True,
+                "gate_error_type": error_type,
+                "qa_passed": None,
+            },
+        )
+
     logger.log(
         "gate_decision_made",
         proposal_id=proposal.proposal_id,
@@ -97,9 +172,20 @@ def handle_pre_tool_use(
     )
 
     if gate_decision.decision == "allow":
+        set_session_state(
+            proposal.session_id,
+            "gate_allow",
+            state_dir=state_dir,
+            detail="Knowledge gate allowed mutation",
+            proposal_id=proposal.proposal_id,
+            tool_use_id=proposal.tool_use_id,
+            auto_reset_after_seconds=4,
+            auto_reset_to="sleeping",
+        )
         logger.log("decision_returned", proposal_id=proposal.proposal_id, status="allow")
+        reason = _status_reason("allow", confidence=gate_decision.confidence)
         return allow_response(
-            gate_decision.reasoning,
+            reason,
             {
                 "proposal_id": proposal.proposal_id,
                 "gate_decision": gate_decision.decision,
@@ -107,6 +193,14 @@ def handle_pre_tool_use(
         )
 
     try:
+        set_session_state(
+            proposal.session_id,
+            "gate_block",
+            state_dir=state_dir,
+            detail="Knowledge gate blocked mutation; QA required",
+            proposal_id=proposal.proposal_id,
+            tool_use_id=proposal.tool_use_id,
+        )
         qa_result = QALoop(event_logger=logger).run(
             proposal=proposal,
             gate_decision=gate_decision,
@@ -115,30 +209,40 @@ def handle_pre_tool_use(
             state_dir=state_dir,
         )
     except Exception as exc:  # noqa: BLE001
-        message = (
-            "QA loop failed to complete; allowing mutation to proceed without"
-            " knowledge-check scoring."
+        error_type = type(exc).__name__
+        set_session_state(
+            proposal.session_id,
+            "error",
+            state_dir=state_dir,
+            detail=f"QA loop failed: {error_type}",
+            proposal_id=proposal.proposal_id,
+            tool_use_id=proposal.tool_use_id,
         )
         logger.log(
             "qa_loop_failed",
             proposal_id=proposal.proposal_id,
             status="error",
-            details={"error_type": type(exc).__name__, "error": str(exc)},
+            details={"error_type": error_type, "error": str(exc)},
         )
         logger.log(
             "decision_returned",
             proposal_id=proposal.proposal_id,
             status="allow",
-            details={"qa_error": True, "qa_error_type": type(exc).__name__},
+            details={"qa_error": True, "qa_error_type": error_type},
+        )
+        reason = _status_reason(
+            "block",
+            qa_error=True,
+            error_type=error_type,
         )
         return allow_response(
-            message,
+            reason,
             {
                 "attempt_count": 0,
                 "gate_decision": gate_decision.decision,
                 "proposal_id": proposal.proposal_id,
                 "qa_error": True,
-                "qa_error_type": type(exc).__name__,
+                "qa_error_type": error_type,
                 "qa_passed": None,
             },
         )
@@ -152,8 +256,24 @@ def handle_pre_tool_use(
             "attempt_count": qa_result.attempt_count,
         },
     )
+    set_session_state(
+        proposal.session_id,
+        "qa_pass" if qa_result.passed else "qa_fail_terminal",
+        state_dir=state_dir,
+        detail="QA passed" if qa_result.passed else "QA failed after max attempts",
+        proposal_id=proposal.proposal_id,
+        tool_use_id=proposal.tool_use_id,
+        attempt_number=qa_result.attempt_count,
+        auto_reset_after_seconds=4 if qa_result.passed else None,
+        auto_reset_to="sleeping" if qa_result.passed else None,
+    )
+    reason = _status_reason(
+        gate_decision.decision,
+        qa_passed=qa_result.passed,
+        attempt_count=qa_result.attempt_count,
+    )
     return allow_response(
-        qa_result.summary,
+        reason,
         {
             "attempt_count": qa_result.attempt_count,
             "gate_decision": gate_decision.decision,

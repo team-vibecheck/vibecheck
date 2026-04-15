@@ -35,7 +35,17 @@ class GradioQARenderer:
     def __init__(self, max_attempts: int = 3) -> None:
         self.max_attempts = max_attempts
 
-    def ask(self, question: str, attempt_number: int, packet: QAPacket) -> str:
+    def ask(
+        self,
+        question: str,
+        attempt_number: int,
+        packet: QAPacket,
+        *,
+        session_id: str = "",
+        proposal_id: str = "",
+        tool_use_id: str = "",
+    ) -> str:
+        del session_id, proposal_id, tool_use_id
         try:
             gr = _import_gradio()
         except ImportError as exc:

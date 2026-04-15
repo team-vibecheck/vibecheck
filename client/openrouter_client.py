@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
@@ -10,6 +11,10 @@ from core.config import resolve_provider_config
 
 class OpenRouterClientError(RuntimeError):
     """Raised when a call to OpenRouter fails or returns malformed content."""
+
+
+class _OpenRouterRateLimitError(RuntimeError):
+    """Raised when OpenRouter returns an HTTP 429 response."""
 
 
 @dataclass(slots=True)
@@ -24,9 +29,12 @@ class InputMessage:
 class OpenRouterClient:
     """OpenRouter client using the stateless Responses API."""
 
+    _FREE_GEMMA_MODEL = "google/gemma-4-31b-it:free"
+    _PAID_GEMMA_MODEL = "google/gemma-4-31b-it"
+
     def __init__(
         self,
-        model: str = "openai/gpt-4o-mini",
+        model: str = _FREE_GEMMA_MODEL,
         site_url: str | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
@@ -44,6 +52,7 @@ class OpenRouterClient:
 
         self._api_key = config.api_key
         self._model = model
+        self._fallback_model = self._PAID_GEMMA_MODEL if model == self._FREE_GEMMA_MODEL else None
         self._endpoint = f"{config.base_url.rstrip('/')}/responses"
         self._app_name = "VibeCheck"
         self._site_url = site_url
@@ -55,9 +64,9 @@ class OpenRouterClient:
         max_output_tokens: int | None = None,
         temperature: float | None = None,
         extra_body: dict[str, Any] | None = None,
+        max_retries: int = 3,
     ) -> str:
         payload: dict[str, Any] = {
-            "model": self._model,
             "input": _normalize_input(input_data),
         }
         if max_output_tokens is not None:
@@ -67,6 +76,37 @@ class OpenRouterClient:
         if extra_body:
             payload.update(extra_body)
 
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                parsed = self._request_response({**payload, "model": self._model})
+                if not isinstance(parsed, dict):
+                    raise OpenRouterClientError("OpenRouter returned an unexpected response shape.")
+                text = _extract_output_text(parsed)
+                if text is None:
+                    raise OpenRouterClientError("OpenRouter response did not include output text.")
+                return text
+            except _OpenRouterRateLimitError as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    wait_time = (2**attempt) + 0.5
+                    time.sleep(wait_time)
+                elif self._fallback_model is not None:
+                    try:
+                        parsed = self._request_response({**payload, "model": self._fallback_model})
+                        text = _extract_output_text(parsed)
+                        if text is not None:
+                            return text
+                    except Exception as fallback_exc:
+                        last_exc = fallback_exc
+
+        if last_exc is not None:
+            raise OpenRouterClientError(
+                f"OpenRouter request failed after {max_retries} retries: {last_exc}"
+            ) from last_exc
+        raise OpenRouterClientError("OpenRouter request failed with unknown error")
+
+    def _request_response(self, payload: dict[str, Any]) -> dict[str, Any]:
         req = request.Request(
             self._endpoint,
             data=json.dumps(payload).encode("utf-8"),
@@ -78,6 +118,8 @@ class OpenRouterClient:
                 raw = response.read()
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            if exc.code == 429:
+                raise _OpenRouterRateLimitError(detail or exc.reason) from exc
             raise OpenRouterClientError(
                 f"OpenRouter request failed with HTTP {exc.code}: {detail or exc.reason}"
             ) from exc
@@ -91,11 +133,7 @@ class OpenRouterClient:
 
         if not isinstance(parsed, dict):
             raise OpenRouterClientError("OpenRouter returned an unexpected response shape.")
-
-        text = _extract_output_text(parsed)
-        if text is None:
-            raise OpenRouterClientError("OpenRouter response did not include output text.")
-        return text
+        return parsed
 
     def _headers(self) -> dict[str, str]:
         headers = {

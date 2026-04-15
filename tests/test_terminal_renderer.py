@@ -38,7 +38,14 @@ def test_true_false_shows_answer_instruction() -> None:
 def test_eof_returns_empty_string() -> None:
     renderer = TerminalQARenderer()
     with patch.object(renderer, "_read_answer", return_value=""):
-        answer = renderer.ask("question?", 1, _make_packet())
+        answer = renderer.ask(
+            "question?",
+            1,
+            _make_packet(),
+            session_id="session-1",
+            proposal_id="proposal-1",
+            tool_use_id="tool-1",
+        )
     assert answer == ""
 
 

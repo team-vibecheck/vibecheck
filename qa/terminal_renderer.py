@@ -6,6 +6,19 @@ from pathlib import Path
 from core.models import QAPacket
 
 _SEPARATOR = "─" * 60
+
+TerminalQARenderer__deprecated__ = """
+.. deprecated::
+    This renderer is **not viable for real Claude Code hook use**.
+    Claude Code is a TUI application that owns /dev/tty — writing to or reading
+    from /dev/tty in a hook corrupts the TUI state and can soft-lock the session.
+
+    See :func:`docs/research-hook-interaction-patterns.md` for details.
+
+    This module is retained for:
+    - Unit testing with FakeRenderer patterns
+    - Standalone CLI invocations where no TUI owns the terminal
+"""
 _MAX_ATTEMPTS_DEFAULT = 3
 
 
@@ -13,7 +26,17 @@ class TerminalQARenderer:
     def __init__(self, max_attempts: int = _MAX_ATTEMPTS_DEFAULT) -> None:
         self.max_attempts = max_attempts
 
-    def ask(self, question: str, attempt_number: int, packet: QAPacket) -> str:
+    def ask(
+        self,
+        question: str,
+        attempt_number: int,
+        packet: QAPacket,
+        *,
+        session_id: str = "",
+        proposal_id: str = "",
+        tool_use_id: str = "",
+    ) -> str:
+        del session_id, proposal_id, tool_use_id
         header = self._format_header(attempt_number, packet)
         body = self._format_body(question, packet)
         prompt_text = f"\n{_SEPARATOR}\n{header}\n{_SEPARATOR}\n\n{body}\n\n> "
@@ -33,8 +56,7 @@ class TerminalQARenderer:
         self._write_output(f"\n{_SEPARATOR}\n")
         if passed:
             self._write_output(
-                f"  PASSED on attempt {attempt_count}/{self.max_attempts}. "
-                f"Mutation will proceed.\n"
+                f"  PASSED on attempt {attempt_count}/{self.max_attempts}. Mutation will proceed.\n"
             )
         else:
             self._write_output(
@@ -46,8 +68,7 @@ class TerminalQARenderer:
     def _format_header(self, attempt_number: int, packet: QAPacket) -> str:
         qtype_label = packet.question_type.replace("_", " ").title()
         return (
-            f"  VibeCheck QA — Attempt {attempt_number}/{self.max_attempts}\n"
-            f"  Type: {qtype_label}"
+            f"  VibeCheck QA — Attempt {attempt_number}/{self.max_attempts}\n  Type: {qtype_label}"
         )
 
     def _format_body(self, question: str, packet: QAPacket) -> str:

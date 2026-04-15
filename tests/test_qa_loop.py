@@ -23,8 +23,17 @@ class FakeRenderer:
         self.answers = answers
         self.index = 0
 
-    def ask(self, question: str, attempt_number: int, packet: QAPacket) -> str:
-        del question, attempt_number, packet
+    def ask(
+        self,
+        question: str,
+        attempt_number: int,
+        packet: QAPacket,
+        *,
+        session_id: str = "",
+        proposal_id: str = "",
+        tool_use_id: str = "",
+    ) -> str:
+        del question, attempt_number, packet, session_id, proposal_id, tool_use_id
         answer = self.answers[self.index]
         self.index += 1
         return answer
@@ -141,6 +150,10 @@ def test_qa_loop_writes_pending_and_result_artifacts(tmp_path, monkeypatch) -> N
     result_path = tmp_path / "state" / "qa" / "results" / "proposal-art.yaml"
     assert pending_path.exists()
     assert result_path.exists()
+    history_path = tmp_path / "state" / "qa" / "history" / "qa_attempts.jsonl"
+    assert history_path.exists()
+    lines = [line for line in history_path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(lines) == 1
 
 
 def test_qa_loop_respects_max_attempts(tmp_path, monkeypatch) -> None:

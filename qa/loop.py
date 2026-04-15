@@ -13,13 +13,23 @@ from qa.competence_updates import apply_qa_outcome
 from qa.evaluation import evaluate_answer
 from qa.question_generation import build_question_prompt
 from qa.renderer_selection import select_renderer
+from qa.sidecar.presence import set_session_state
 
 if TYPE_CHECKING:
     from core.event_logger import EventLogger
 
 
 class QARenderer(Protocol):
-    def ask(self, question: str, attempt_number: int, packet: QAPacket) -> str: ...
+    def ask(
+        self,
+        question: str,
+        attempt_number: int,
+        packet: QAPacket,
+        *,
+        session_id: str = "",
+        proposal_id: str = "",
+        tool_use_id: str = "",
+    ) -> str: ...
 
 
 class QALoop:
@@ -53,6 +63,9 @@ class QALoop:
                 gate_decision.qa_packet.question_type,
                 max_attempts=self.max_attempts,
             )
+            configure = getattr(renderer, "configure", None)
+            if callable(configure):
+                configure(event_logger=self._logger, state_dir=state_dir)
         else:
             renderer = self.renderer
         assert renderer is not None
@@ -85,7 +98,32 @@ class QALoop:
                     "question_type": gate_decision.qa_packet.question_type,
                 },
             )
-            answer = renderer.ask(question, attempt_number, gate_decision.qa_packet)
+            set_session_state(
+                proposal.session_id,
+                "qa_waiting_submission",
+                state_dir=state_dir,
+                detail="Question ready for user submission",
+                proposal_id=proposal.proposal_id,
+                tool_use_id=proposal.tool_use_id,
+                attempt_number=attempt_number,
+            )
+            answer = renderer.ask(
+                question,
+                attempt_number,
+                gate_decision.qa_packet,
+                session_id=proposal.session_id,
+                proposal_id=proposal.proposal_id,
+                tool_use_id=proposal.tool_use_id,
+            )
+            set_session_state(
+                proposal.session_id,
+                "qa_evaluating",
+                state_dir=state_dir,
+                detail="Evaluating submitted answer",
+                proposal_id=proposal.proposal_id,
+                tool_use_id=proposal.tool_use_id,
+                attempt_number=attempt_number,
+            )
             evaluation = evaluate_answer(
                 question=question,
                 answer=answer,
@@ -93,11 +131,31 @@ class QALoop:
                 context_excerpt=context_excerpt,
                 attempt_number=attempt_number,
             )
+            _append_qa_history(
+                state_dir=state_dir,
+                proposal=proposal,
+                packet=gate_decision.qa_packet,
+                question=question,
+                answer=answer,
+                attempt_number=attempt_number,
+                passed=evaluation.passed,
+                feedback=evaluation.feedback,
+                relevant_concepts=gate_decision.relevant_concepts,
+            )
             self._log(
                 "qa_answer_evaluated",
                 proposal_id=proposal.proposal_id,
                 status="passed" if evaluation.passed else "failed",
                 details={"attempt_number": attempt_number, "feedback": evaluation.feedback},
+            )
+            set_session_state(
+                proposal.session_id,
+                "qa_pass" if evaluation.passed else "qa_fail_attempt",
+                state_dir=state_dir,
+                detail=evaluation.feedback,
+                proposal_id=proposal.proposal_id,
+                tool_use_id=proposal.tool_use_id,
+                attempt_number=attempt_number,
             )
             attempts.append(
                 QAAttempt(
@@ -190,3 +248,45 @@ def _try_show_outcome(renderer: object, *, passed: bool, attempt_count: int) -> 
 def _write_yaml(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _append_qa_history(
+    *,
+    state_dir: Path,
+    proposal: ChangeProposal,
+    packet: QAPacket,
+    question: str,
+    answer: str,
+    attempt_number: int,
+    passed: bool,
+    feedback: str,
+    relevant_concepts: list[str],
+) -> None:
+    import json
+    from datetime import UTC, datetime
+
+    history_path = state_dir / "qa" / "history" / "qa_attempts.jsonl"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    question_id = f"{proposal.proposal_id}:attempt-{attempt_number}"
+    record = {
+        "record_version": 1,
+        "question_id": question_id,
+        "proposal_id": proposal.proposal_id,
+        "session_id": proposal.session_id,
+        "tool_use_id": proposal.tool_use_id,
+        "attempt_number": attempt_number,
+        "question_type": packet.question_type,
+        "question": question,
+        "answer": answer,
+        "feedback": feedback,
+        "passed": passed,
+        "relevant_concepts": relevant_concepts,
+        "context_ref": "agg/current_attempt.md",
+        "created_at": now,
+        "answered_at": now,
+    }
+
+    with history_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, separators=(",", ":")) + "\n")
