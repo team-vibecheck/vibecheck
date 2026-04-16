@@ -72,6 +72,10 @@ def test_gate_blocks_larger_change(tmp_path, monkeypatch) -> None:
     assert decision.decision == "block"
     assert decision.qa_packet is not None
     assert decision.qa_packet.question_type == "plain_english"
+    assert "## Relevant Transcript Slice" not in decision.qa_packet.context_excerpt
+    assert "## Repo-Local Notes" not in decision.qa_packet.context_excerpt
+    assert "## New Code" in decision.qa_packet.context_excerpt
+    assert "## Unified Diff" in decision.qa_packet.context_excerpt
 
 
 def test_gate_uses_model_structured_output_when_client_available(tmp_path) -> None:

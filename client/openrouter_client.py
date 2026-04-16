@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
-
-from core.config import resolve_provider_config
 
 
 class OpenRouterClientError(RuntimeError):
@@ -29,15 +28,19 @@ class InputMessage:
 class OpenRouterClient:
     """OpenRouter client using the stateless Responses API."""
 
-    _FREE_GEMMA_MODEL = "google/gemma-4-31b-it:free"
-    _PAID_GEMMA_MODEL = "google/gemma-4-31b-it"
+    _FREE_GEMMA_MODEL = "google/gemma-4-26b-a4b-it:free"
+    _PAID_GEMMA_MODEL = "google/gemma-4-26b-a4b-it"
+    _MODEL_ENV = "VIBECHECK_GATE_MODEL"
+    _FALLBACK_MODEL_ENV = "VIBECHECK_GATE_FALLBACK_MODEL"
 
     def __init__(
         self,
-        model: str = _FREE_GEMMA_MODEL,
+        model: str | None = None,
         site_url: str | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
+        from core.config import resolve_provider_config
+
         try:
             config = resolve_provider_config()
         except FileNotFoundError as exc:
@@ -50,9 +53,21 @@ class OpenRouterClient:
                 "OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'vibecheck auth'."
             )
 
+        resolved_model = (model or os.environ.get(self._MODEL_ENV, "").strip() or self._FREE_GEMMA_MODEL)
+        fallback_override = os.environ.get(self._FALLBACK_MODEL_ENV, "").strip()
+
+        fallback_model: str | None = None
+        if fallback_override:
+            fallback_model = fallback_override
+        elif resolved_model == self._FREE_GEMMA_MODEL:
+            fallback_model = self._PAID_GEMMA_MODEL
+
+        if fallback_model == resolved_model:
+            fallback_model = None
+
         self._api_key = config.api_key
-        self._model = model
-        self._fallback_model = self._PAID_GEMMA_MODEL if model == self._FREE_GEMMA_MODEL else None
+        self._model = resolved_model
+        self._fallback_model = fallback_model
         self._endpoint = f"{config.base_url.rstrip('/')}/responses"
         self._app_name = "VibeCheck"
         self._site_url = site_url

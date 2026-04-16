@@ -54,7 +54,7 @@ def handle_session_start(payload: dict[str, Any], *, state_dir: Path = STATE_DIR
             state_dir=state_dir,
             detail="Waiting for agent loop",
         )
-        opened = open_ui_once_for_pid(port, pid, state_dir=state_dir)
+        opened = open_ui_once_for_pid(port, pid, state_dir=state_dir, session_id=session_id)
         logger.log(
             "sidecar_prewarm_ok",
             session_id=session_id,

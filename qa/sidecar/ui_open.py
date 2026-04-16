@@ -19,6 +19,7 @@ def open_ui_once_for_pid(
     *,
     state_dir: Path,
     allow_reopen_after_seconds: int | None = None,
+    session_id: str = "",
 ) -> bool:
     if pid <= 0:
         return False
@@ -27,8 +28,14 @@ def open_ui_once_for_pid(
     tracker_payload = _read_tracker(tracker)
     seen_pid = _as_int(tracker_payload.get("last_opened_pid"))
     last_opened_at = _as_int(tracker_payload.get("last_opened_at")) or 0
+    seen_session_id = str(tracker_payload.get("last_opened_session_id") or "").strip()
+    current_session_id = session_id.strip()
 
-    if allow_reopen_after_seconds is None and seen_pid == pid:
+    if (
+        allow_reopen_after_seconds is None
+        and seen_pid == pid
+        and (not current_session_id or current_session_id == seen_session_id)
+    ):
         return False
 
     if allow_reopen_after_seconds is not None:
@@ -39,7 +46,8 @@ def open_ui_once_for_pid(
 
     url = f"http://127.0.0.1:{port}/"
     opened = _open_url(url)
-    _write_tracker(tracker, pid)
+    if opened:
+        _write_tracker(tracker, pid, session_id=current_session_id)
     return opened
 
 
@@ -79,11 +87,12 @@ def _read_tracker(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _write_tracker(path: Path, pid: int) -> None:
+def _write_tracker(path: Path, pid: int, *, session_id: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "last_opened_pid": pid,
         "last_opened_at": int(time.time()),
+        "last_opened_session_id": session_id,
     }
     tmp_path = path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")

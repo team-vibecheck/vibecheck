@@ -5,10 +5,12 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -44,11 +46,14 @@ ENV_IDLE_TIMEOUT = "VIBECHECK_SIDECAR_IDLE_TIMEOUT"
 ENV_DETACH_GRACE = "VIBECHECK_SIDECAR_DETACH_GRACE"
 ENV_ANSWER_TTL = "VIBECHECK_SIDECAR_ANSWER_TTL"
 ENV_TRANSIENT_STATE_MAX_AGE = "VIBECHECK_SIDECAR_TRANSIENT_STATE_MAX_AGE"
+ENV_ORPHAN_TTL = "VIBECHECK_SIDECAR_ORPHAN_TTL"
 
 DEFAULT_IDLE_TIMEOUT = 600
 DEFAULT_DETACH_GRACE = 180
 DEFAULT_ANSWER_TTL = 1800
 DEFAULT_TRANSIENT_STATE_MAX_AGE = 90
+DEFAULT_ORPHAN_TTL = 600
+SIDECAR_COMPAT_VERSION = 2
 RUNTIME_FILE_NAME = "sidecar.runtime.json"
 
 
@@ -80,7 +85,12 @@ class SidecarState:
             int(os.environ.get(ENV_TRANSIENT_STATE_MAX_AGE, str(DEFAULT_TRANSIENT_STATE_MAX_AGE))),
             5,
         )
+        self._orphan_ttl_seconds = max(
+            _as_int(os.environ.get(ENV_ORPHAN_TTL), default=DEFAULT_ORPHAN_TTL),
+            30,
+        )
         self._load_runtime_state()
+        self._reconcile_runtime_state()
 
     def _touch(self) -> None:
         self._last_activity_at = time.time()
@@ -278,6 +288,70 @@ class SidecarState:
             "active_question_id": active_question_id,
         }
 
+    def detach_session_questions(self, session_id: str, *, reason: str = "session_detach") -> dict[str, Any]:
+        session = session_id.strip()
+        if not session:
+            with self._lock:
+                return {
+                    "status": "noop",
+                    "removed_total": 0,
+                    "removed_current": 0,
+                    "removed_pending": 0,
+                    "queue_depth": len(self._pending),
+                    "active_question_id": self._current_question_id_locked(),
+                }
+
+        with self._lock:
+            removed = self._drop_questions_locked(
+                lambda item: str(item.get("session_id") or "").strip() == session,
+                reason=reason,
+            )
+            if removed["removed_total"] > 0:
+                self._touch()
+                self._touch_question_activity()
+                queue_depth = len(self._pending)
+                active_session_id = self._current_session_id_locked()
+                if active_session_id:
+                    self._set_active_waiting_presence_locked(active_session_id, queue_depth=queue_depth)
+                self._persist_runtime_locked()
+
+            return {
+                "status": "ok",
+                "session_id": session,
+                **removed,
+                "queue_depth": len(self._pending),
+                "active_question_id": self._current_question_id_locked(),
+            }
+
+    def prune_orphaned_questions(self, *, reason: str = "orphan_reaper") -> dict[str, Any]:
+        active_sessions = _active_leased_sessions(state_dir=self._state_dir)
+        now = datetime.now(UTC)
+
+        with self._lock:
+            removed = self._drop_questions_locked(
+                lambda item: self._is_orphaned_question_locked(
+                    item,
+                    active_sessions=active_sessions,
+                    now=now,
+                ),
+                reason=reason,
+            )
+            if removed["removed_total"] > 0:
+                self._touch()
+                self._touch_question_activity()
+                queue_depth = len(self._pending)
+                active_session_id = self._current_session_id_locked()
+                if active_session_id:
+                    self._set_active_waiting_presence_locked(active_session_id, queue_depth=queue_depth)
+                self._persist_runtime_locked()
+
+            return {
+                "status": "ok",
+                **removed,
+                "active_leases": len(active_sessions),
+                "orphan_ttl_seconds": self._orphan_ttl_seconds,
+            }
+
     def answer_status(self, question_id: str, *, session_id: str = "") -> dict[str, Any]:
         question_id = question_id.strip()
         if not question_id:
@@ -300,6 +374,19 @@ class SidecarState:
             feedback = self._last_feedback
             current_question_id = self._current_question_id_locked()
             answered_count = len(self._answered)
+            current_context_excerpt = str(current.get("context_excerpt", "")) if current else ""
+            current_path = _extract_metadata_value(current_context_excerpt, key="primary_path")
+            current_language = _extract_metadata_value(current_context_excerpt, key="primary_language")
+
+        context_preview = _build_context_preview(
+            current_context_excerpt,
+            focus_text=str(current.get("question", "")) if current else "",
+        )
+        context_language = _resolve_preview_language(
+            explicit_language=current_language,
+            path=current_path,
+            preview_text=context_preview,
+        )
 
         presence = self._normalize_presence_for_idle(
             presence,
@@ -314,7 +401,15 @@ class SidecarState:
             "queue_depth": queue_depth,
             "has_current_question": current is not None,
             "current_question_id": current_question_id,
+            "current_session_id": str(current.get("session_id", "")) if current else "",
+            "current_proposal_id": str(current.get("proposal_id", "")) if current else "",
+            "current_tool_use_id": str(current.get("tool_use_id", "")) if current else "",
+            "current_created_at": str(current.get("created_at", "")) if current else "",
             "question": str(current.get("question", "")) if current else "",
+            "context_excerpt": current_context_excerpt,
+            "context_preview": context_preview,
+            "context_preview_language": context_language,
+            "context_primary_path": current_path,
             "attempt": int(current.get("attempt", 1)) if current else None,
             "question_type": str(current.get("question_type", "plain_english"))
             if current
@@ -547,6 +642,153 @@ class SidecarState:
         tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         tmp_path.replace(self._runtime_path)
 
+    def _reconcile_runtime_state(self) -> None:
+        with self._lock:
+            changed = False
+
+            if self._current_question is None and self._pending:
+                self._current_question = self._pending.popleft()
+                changed = True
+
+            self._prune_answered_locked()
+
+            active_sessions = _active_leased_sessions(state_dir=self._state_dir)
+            now = datetime.now(UTC)
+            removed = self._drop_questions_locked(
+                lambda item: self._is_orphaned_question_locked(
+                    item,
+                    active_sessions=active_sessions,
+                    now=now,
+                ),
+                reason="startup_reconcile",
+            )
+            changed = changed or removed["removed_total"] > 0
+
+            repaired = self._repair_request_index_locked()
+            changed = changed or repaired
+
+            if self._current_question is not None:
+                self._touch_question_activity()
+                active_session_id = self._current_session_id_locked()
+                if active_session_id:
+                    self._set_active_waiting_presence_locked(
+                        active_session_id,
+                        queue_depth=len(self._pending),
+                    )
+
+            if changed:
+                self._touch()
+                self._persist_runtime_locked()
+
+    def _drop_questions_locked(
+        self,
+        predicate: Callable[[dict[str, Any]], bool],
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        removed_current = 0
+        removed_pending = 0
+        removed_ids: list[str] = []
+
+        if self._current_question is not None and predicate(self._current_question):
+            current_id = str(self._current_question.get("question_id") or "").strip()
+            if current_id:
+                removed_ids.append(current_id)
+            self._current_question = None
+            removed_current = 1
+
+        kept_pending: deque[dict[str, Any]] = deque()
+        for item in self._pending:
+            if predicate(item):
+                removed_pending += 1
+                pending_id = str(item.get("question_id") or "").strip()
+                if pending_id:
+                    removed_ids.append(pending_id)
+                continue
+            kept_pending.append(item)
+
+        self._pending = kept_pending
+        if self._current_question is None and self._pending:
+            self._current_question = self._pending.popleft()
+
+        if removed_ids:
+            removed_id_set = set(removed_ids)
+            for request_id, question_id in list(self._request_index.items()):
+                if question_id in removed_id_set:
+                    self._request_index.pop(request_id, None)
+
+        removed_total = removed_current + removed_pending
+        if removed_total > 0:
+            self._last_feedback = (
+                f"Dropped {removed_total} orphaned question(s) ({reason.replace('_', ' ')})."
+            )
+
+        return {
+            "removed_total": removed_total,
+            "removed_current": removed_current,
+            "removed_pending": removed_pending,
+            "removed_question_ids": removed_ids,
+        }
+
+    def _set_active_waiting_presence_locked(self, session_id: str, *, queue_depth: int) -> None:
+        if self._current_question is None:
+            return
+
+        set_session_state(
+            session_id,
+            "qa_waiting_submission",
+            state_dir=self._state_dir,
+            detail="Question ready for submission",
+            proposal_id=str(self._current_question.get("proposal_id") or ""),
+            tool_use_id=str(self._current_question.get("tool_use_id") or ""),
+            attempt_number=_as_int(self._current_question.get("attempt"), default=1),
+            question_id=str(self._current_question.get("question_id") or ""),
+            queue_depth=queue_depth,
+        )
+
+    def _is_orphaned_question_locked(
+        self,
+        item: dict[str, Any],
+        *,
+        active_sessions: set[str],
+        now: datetime,
+    ) -> bool:
+        session_id = str(item.get("session_id") or "").strip()
+        if session_id and session_id in active_sessions:
+            return False
+
+        age_seconds = self._question_age_seconds_locked(item, now=now)
+        return not age_seconds < self._orphan_ttl_seconds
+
+    def _question_age_seconds_locked(self, item: dict[str, Any], *, now: datetime) -> float:
+        created = _parse_iso(item.get("created_at"))
+        if created is None:
+            return float(self._orphan_ttl_seconds)
+        return max((now - created).total_seconds(), 0.0)
+
+    def _repair_request_index_locked(self) -> bool:
+        known_ids: set[str] = set()
+        if self._current_question is not None:
+            current_id = str(self._current_question.get("question_id") or "").strip()
+            if current_id:
+                known_ids.add(current_id)
+
+        for item in self._pending:
+            pending_id = str(item.get("question_id") or "").strip()
+            if pending_id:
+                known_ids.add(pending_id)
+
+        for answered_id in self._answered:
+            if answered_id.strip():
+                known_ids.add(answered_id.strip())
+
+        changed = False
+        for request_id, question_id in list(self._request_index.items()):
+            if question_id not in known_ids:
+                self._request_index.pop(request_id, None)
+                changed = True
+        return changed
+
 
 def _import_gradio() -> Any:
     import importlib
@@ -584,6 +826,7 @@ def run_server(port: int = 7865) -> None:
         sessions_md = gr.Markdown("No session activity yet.", visible=False)
         status_md = gr.Markdown("Status: waiting for questions")
         question_md = gr.Markdown("No active question.")
+        context_md = gr.Markdown("", visible=False)
         answer_box = gr.Textbox(
             label="Your answer",
             lines=6,
@@ -598,8 +841,9 @@ def run_server(port: int = 7865) -> None:
 
             sessions = presence.get("sessions") if isinstance(presence, dict) else []
             if isinstance(sessions, list) and sessions:
+                visible_sessions = _limit_detached_sessions(sessions, max_detached=2)
                 lines = []
-                for item in sessions[:8]:
+                for item in visible_sessions[:8]:
                     if not isinstance(item, dict):
                         continue
                     selected = "**" if item.get("is_selected") else ""
@@ -609,7 +853,7 @@ def run_server(port: int = 7865) -> None:
                         f"- {selected}{item.get('emoji', '⚪')} `{short_sid}` {item.get('label', '')}{selected}"
                     )
                 sessions_line = "\n".join(lines) if lines else "No session activity yet."
-                sessions_grid = _render_session_cards(sessions)
+                sessions_grid = _render_session_cards(visible_sessions)
             else:
                 sessions_line = "No session activity yet."
                 sessions_grid = "<div>No session activity yet.</div>"
@@ -626,10 +870,12 @@ def run_server(port: int = 7865) -> None:
                     sessions_line,
                     status,
                     "No active question.",
+                    "",
                     snap["feedback"],
                     gr.update(visible=False),
                     gr.update(visible=False),
                     gr.update(visible=True),
+                    gr.update(visible=False),
                     gr.update(visible=False),
                 )
 
@@ -641,16 +887,30 @@ def run_server(port: int = 7865) -> None:
                 f" | queued: {snap['queue_depth']}"
                 f" | idle: {snap['idle_seconds']}s"
             )
+            context_excerpt = str(snap.get("context_excerpt") or "").strip()
+            context_preview = str(snap.get("context_preview") or "").strip()
+            context_language = str(snap.get("context_preview_language") or "text").strip() or "text"
+            context_display = ""
+            if context_preview:
+                context_display = (
+                    "### Context Preview\n```"
+                    + context_language
+                    + "\n"
+                    + context_preview
+                    + "\n```"
+                )
             return (
                 sessions_grid,
                 sessions_line,
                 status,
                 str(snap["question"]),
+                context_display,
                 snap["feedback"],
                 gr.update(visible=True),
                 gr.update(visible=True),
                 gr.update(visible=False),
                 gr.update(visible=True),
+                gr.update(visible=bool(context_preview or context_excerpt)),
             )
 
         def submit_ui(answer_text: str) -> tuple[str, str]:
@@ -668,11 +928,13 @@ def run_server(port: int = 7865) -> None:
                 sessions_md,
                 status_md,
                 question_md,
+                context_md,
                 feedback_md,
                 answer_box,
                 submit_btn,
                 sessions_html,
                 sessions_md,
+                context_md,
             ],
         )
 
@@ -685,6 +947,8 @@ def run_server(port: int = 7865) -> None:
             {
                 "status": "ok",
                 "pid": os.getpid(),
+                "compat_version": SIDECAR_COMPAT_VERSION,
+                "supports_session_detach": True,
                 "queue_depth": snap["queue_depth"],
                 "has_current_question": snap["has_current_question"],
                 "current_question_id": snap["current_question_id"],
@@ -747,6 +1011,19 @@ def run_server(port: int = 7865) -> None:
             status_code = 403
         return JSONResponse(result, status_code=status_code)
 
+    @app.post("/api/session/detach")
+    async def api_session_detach(body: dict[str, Any]) -> Any:
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Invalid payload"}, status_code=400)
+
+        session_id = str(body.get("session_id") or "").strip()
+        if not session_id:
+            return JSONResponse({"error": "Missing session_id"}, status_code=400)
+
+        reason = str(body.get("reason") or "session_detach").strip() or "session_detach"
+        result = state.detach_session_questions(session_id, reason=reason)
+        return JSONResponse(result, status_code=200)
+
     @app.post("/api/shutdown")
     async def api_shutdown(request: Request) -> Any:
         force = str(request.query_params.get("force", "")).strip().lower() in {
@@ -770,6 +1047,7 @@ def run_server(port: int = 7865) -> None:
             server = server_ref.get("server")
             if server is None or server.should_exit:
                 return
+            state.prune_orphaned_questions(reason="idle_monitor")
             if state.should_idle_shutdown():
                 server.should_exit = True
                 return
@@ -819,6 +1097,221 @@ def _count_active_leases(*, prune: bool, state_dir: Path) -> int:
     from qa.sidecar.leases import count_active_leases
 
     return count_active_leases(prune=prune, state_dir=state_dir)
+
+
+def _active_leased_sessions(*, state_dir: Path) -> set[str]:
+    from qa.sidecar.leases import list_active_leases
+
+    records = list_active_leases(prune=True, state_dir=state_dir)
+    return {
+        str(record.get("session_id") or "").strip()
+        for record in records
+        if str(record.get("session_id") or "").strip()
+    }
+
+
+def _limit_detached_sessions(
+    sessions: list[dict[str, Any]],
+    *,
+    max_detached: int,
+) -> list[dict[str, Any]]:
+    if max_detached < 0:
+        max_detached = 0
+
+    detached_count = 0
+    limited: list[dict[str, Any]] = []
+    for item in sessions:
+        if not isinstance(item, dict):
+            continue
+        is_detached = str(item.get("state") or "") == "detached"
+        if is_detached:
+            if detached_count >= max_detached:
+                continue
+            detached_count += 1
+        limited.append(item)
+
+    return limited
+
+
+def _build_context_preview(
+    context_excerpt: str,
+    *,
+    focus_text: str = "",
+    max_lines: int = 16,
+    max_chars: int = 2200,
+) -> str:
+    text = (context_excerpt or "").strip()
+    if not text:
+        return ""
+
+    lines = text.splitlines()
+    section = _extract_most_relevant_section(lines, focus_text=focus_text)
+    selected = _trim_relevant_window(section if section else lines, focus_text=focus_text, max_lines=max_lines)
+    preview = "\n".join(selected).strip()
+    if len(preview) > max_chars:
+        preview = preview[: max_chars - 3].rstrip() + "..."
+
+    has_more = len(section) > max_lines if section else len(lines) > max_lines
+    if has_more and not preview.endswith("..."):
+        preview += "\n..."
+    return preview
+
+
+def _extract_most_relevant_section(lines: list[str], *, focus_text: str) -> list[str]:
+    sections: list[tuple[str, list[str]]] = []
+    for heading in ("## New Code", "## Unified Diff", "## Surrounding Code"):
+        section = _extract_markdown_section(lines, heading=heading)
+        if section:
+            sections.append((heading, section))
+
+    if not sections:
+        return []
+
+    if not focus_text.strip():
+        return sections[0][1]
+
+    best_section = sections[0][1]
+    best_score = _score_relevance("\n".join(best_section), focus_text)
+    for _heading, section in sections[1:]:
+        score = _score_relevance("\n".join(section), focus_text)
+        if score > best_score:
+            best_score = score
+            best_section = section
+    return best_section
+
+
+def _trim_relevant_window(lines: list[str], *, focus_text: str, max_lines: int) -> list[str]:
+    if len(lines) <= max_lines:
+        return lines
+
+    if not focus_text.strip():
+        return lines[:max_lines]
+
+    best_start = 0
+    best_score = float("-inf")
+    upper = max(len(lines) - max_lines + 1, 1)
+    for start in range(upper):
+        window = lines[start : start + max_lines]
+        score = _score_relevance("\n".join(window), focus_text)
+        if score > best_score:
+            best_score = score
+            best_start = start
+    return lines[best_start : best_start + max_lines]
+
+
+def _score_relevance(text: str, focus_text: str) -> float:
+    snippet = text.lower()
+    tokens = _focus_tokens(focus_text)
+    if not tokens:
+        return 0.0
+
+    score = 0.0
+    for token in tokens:
+        if token in snippet:
+            score += 2.0
+    for token in tokens:
+        score += min(snippet.count(token), 3) * 0.25
+    return score
+
+
+def _focus_tokens(text: str) -> list[str]:
+    raw = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text)
+    stop_words = {
+        "the",
+        "and",
+        "for",
+        "from",
+        "with",
+        "that",
+        "this",
+        "when",
+        "into",
+        "your",
+        "code",
+        "function",
+        "line",
+        "fill",
+        "blank",
+        "blanks",
+        "context",
+        "excerpt",
+        "weather",
+    }
+    tokens: list[str] = []
+    for token in raw:
+        lowered = token.lower()
+        if lowered in stop_words:
+            continue
+        if lowered not in tokens:
+            tokens.append(lowered)
+        if len(tokens) >= 24:
+            break
+    return tokens
+
+
+def _extract_metadata_value(context_excerpt: str, *, key: str) -> str:
+    for line in context_excerpt.splitlines():
+        stripped = line.strip()
+        prefix = f"- {key}:"
+        if stripped.startswith(prefix):
+            return stripped[len(prefix) :].strip()
+    return ""
+
+
+def _resolve_preview_language(*, explicit_language: str, path: str, preview_text: str) -> str:
+    language = explicit_language.strip().lower()
+    if language and language != "text":
+        return language
+
+    if path:
+        detected = _detect_language(path)
+        if detected:
+            return detected
+
+    if preview_text.lstrip().startswith(("diff --git", "@@ ", "--- ", "+++ ", "+", "-")):
+        return "diff"
+
+    return "text"
+
+
+def _detect_language(path: str) -> str | None:
+    suffix = Path(path).suffix.lower()
+    return {
+        ".py": "python",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".jsx": "javascript",
+        ".json": "json",
+        ".md": "markdown",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".toml": "toml",
+        ".rs": "rust",
+        ".java": "java",
+        ".html": "html",
+        ".css": "css",
+    }.get(suffix)
+
+
+def _extract_markdown_section(lines: list[str], *, heading: str) -> list[str]:
+    start_index: int | None = None
+    for idx, line in enumerate(lines):
+        if line.strip() == heading:
+            start_index = idx
+            break
+
+    if start_index is None:
+        return []
+
+    end_index = len(lines)
+    for idx in range(start_index + 1, len(lines)):
+        stripped = lines[idx].strip()
+        if stripped.startswith("## "):
+            end_index = idx
+            break
+
+    return lines[start_index:end_index]
 
 
 def _render_session_cards(sessions: list[dict[str, Any]]) -> str:

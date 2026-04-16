@@ -31,7 +31,12 @@ class AnswerEvaluationResult(BaseModel):
 
 
 class LLMQAClient:
-    def __init__(self, model: str = "openai/gpt-4o-mini") -> None:
+    _DEFAULT_MODEL = "google/gemma-4-26b-a4b-it:free"
+    _DEFAULT_FALLBACK_MODEL = "google/gemma-4-26b-a4b-it"
+    _MODEL_ENV = "VIBECHECK_QA_MODEL"
+    _FALLBACK_MODEL_ENV = "VIBECHECK_QA_FALLBACK_MODEL"
+
+    def __init__(self, model: str | None = None, fallback_model: str | None = None) -> None:
         try:
             config = resolve_provider_config()
         except FileNotFoundError as exc:
@@ -42,8 +47,25 @@ class LLMQAClient:
             raise RuntimeError(
                 "OpenRouter credentials are required. Set OPENROUTER_API_KEY or run 'vibecheck auth'."
             )
+
+        resolved_model = (
+            model
+            or os.environ.get(self._MODEL_ENV, "").strip()
+            or self._DEFAULT_MODEL
+        )
+        resolved_fallback = (
+            fallback_model
+            or os.environ.get(self._FALLBACK_MODEL_ENV, "").strip()
+            or (self._DEFAULT_FALLBACK_MODEL if resolved_model == self._DEFAULT_MODEL else "")
+        )
+        if resolved_fallback == resolved_model:
+            resolved_fallback = ""
+
         os.environ.setdefault("OPENROUTER_API_KEY", config.api_key)
-        self._model = ChatOpenRouter(model=model, temperature=0.3)
+        self._model = ChatOpenRouter(model=resolved_model, temperature=0.3)
+        self._fallback_model = (
+            ChatOpenRouter(model=resolved_fallback, temperature=0.3) if resolved_fallback else None
+        )
 
     def generate_question(
         self,
@@ -72,16 +94,13 @@ class LLMQAClient:
 ## Competence Gap Rationale
 {gate_decision.competence_gap.rationale if gate_decision.competence_gap else "Not specified"}"""
 
-        chain = self._model.with_structured_output(GeneratedQuestion)
-        result = chain.invoke(
-            [
-                ("system", system_prompt),
-                ("human", user_prompt),
-            ]
+        return _invoke_with_optional_fallback(
+            primary=self._model,
+            fallback=self._fallback_model,
+            output_model=GeneratedQuestion,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         )
-        if isinstance(result, dict):
-            return GeneratedQuestion.model_validate(result)
-        return result  # type: ignore[return-value]
 
     def evaluate_answer(
         self,
@@ -104,16 +123,13 @@ class LLMQAClient:
     ## Attempt Number
     {attempt_number}"""
 
-        chain = self._model.with_structured_output(AnswerEvaluationResult)
-        result = chain.invoke(
-            [
-                ("system", system_prompt),
-                ("human", user_prompt),
-            ]
+        return _invoke_with_optional_fallback(
+            primary=self._model,
+            fallback=self._fallback_model,
+            output_model=AnswerEvaluationResult,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         )
-        if isinstance(result, dict):
-            return AnswerEvaluationResult.model_validate(result)
-        return result  # type: ignore[return-value]
 
 
 def _get_scaffolding_prompt(attempt_number: int, question_type: QuestionType) -> str:
@@ -194,3 +210,33 @@ def get_llm_client() -> LLMQAClient:
     if _client is None:
         _client = LLMQAClient()
     return _client
+
+
+def _invoke_with_optional_fallback(
+    *,
+    primary: ChatOpenRouter,
+    fallback: ChatOpenRouter | None,
+    output_model: type[BaseModel],
+    system_prompt: str,
+    user_prompt: str,
+) -> BaseModel:
+    messages = [
+        ("system", system_prompt),
+        ("human", user_prompt),
+    ]
+
+    try:
+        chain = primary.with_structured_output(output_model)
+        result = chain.invoke(messages)
+        if isinstance(result, dict):
+            return output_model.model_validate(result)
+        return result
+    except Exception:  # noqa: BLE001
+        if fallback is None:
+            raise
+
+    chain = fallback.with_structured_output(output_model)
+    result = chain.invoke(messages)
+    if isinstance(result, dict):
+        return output_model.model_validate(result)
+    return result

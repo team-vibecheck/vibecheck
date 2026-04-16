@@ -186,3 +186,23 @@ def test_client_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(OpenRouterClientError, match="HTTP 401"):
         client.create_response("hello")
+
+
+def test_openrouter_defaults_to_gemma_26b_a4b_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+
+    client = OpenRouterClient()
+
+    assert client._model == "google/gemma-4-26b-a4b-it:free"  # noqa: SLF001
+    assert client._fallback_model == "google/gemma-4-26b-a4b-it"  # noqa: SLF001
+
+
+def test_openrouter_honors_gate_model_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("VIBECHECK_GATE_MODEL", "provider/gate-fast")
+    monkeypatch.setenv("VIBECHECK_GATE_FALLBACK_MODEL", "provider/gate-safe")
+
+    client = OpenRouterClient()
+
+    assert client._model == "provider/gate-fast"  # noqa: SLF001
+    assert client._fallback_model == "provider/gate-safe"  # noqa: SLF001

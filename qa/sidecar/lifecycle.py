@@ -33,6 +33,7 @@ DEFAULT_IDLE_TIMEOUT = 1800
 DEFAULT_POLL_INTERVAL = 0.5
 DEFAULT_STARTUP_TIMEOUT = 20.0
 _HEALTH_COMPAT_KEY = "current_question_id"
+_HEALTH_MIN_COMPAT_VERSION = 2
 
 
 def get_config() -> dict[str, int | float]:
@@ -259,7 +260,14 @@ def _as_int(value: Any) -> int | None:
 
 
 def _is_compatible_health(health: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
-    return isinstance(health, dict) and _HEALTH_COMPAT_KEY in health
+    if not (isinstance(health, dict) and _HEALTH_COMPAT_KEY in health):
+        return False
+
+    compat_version = _as_int(health.get("compat_version"))
+    if compat_version is None:
+        return False
+
+    return compat_version >= _HEALTH_MIN_COMPAT_VERSION
 
 
 def _recycle_incompatible_sidecar(port: int, health: dict[str, Any] | None) -> None:

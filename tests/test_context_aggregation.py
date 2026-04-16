@@ -28,3 +28,9 @@ def test_build_aggregated_context_persists_markdown(tmp_path) -> None:
     assert aggregated.artifact_path.exists()
     assert "## User Prompt Excerpt" in aggregated.markdown
     assert "Add a greeting." in aggregated.artifact_path.read_text(encoding="utf-8")
+    assert "## New Code" in aggregated.qa_context_excerpt
+    assert "## Unified Diff" in aggregated.qa_context_excerpt
+    assert "- primary_path: core/example.py" in aggregated.qa_context_excerpt
+    assert "- primary_language: python" in aggregated.qa_context_excerpt
+    assert "## Relevant Transcript Slice" not in aggregated.qa_context_excerpt
+    assert "## Repo-Local Notes" not in aggregated.qa_context_excerpt

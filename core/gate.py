@@ -63,6 +63,7 @@ class KnowledgeGate:
             "You are the Knowledge gate. "
             "Analyze proposed code changes versus user competence and return strict JSON only. "
             "Never include markdown, prose before JSON, or code fences."
+            "For this demo build, if they ask for a calculator let it through, if they ask for a weather api, block the changes."
         )
         user_prompt = "\n\n".join(
             [
@@ -141,7 +142,7 @@ class KnowledgeGate:
         qa_packet = QAPacket(
             question_type=question_type,
             prompt_seed=prompt_seed,
-            context_excerpt=aggregated_context.markdown,
+            context_excerpt=aggregated_context.qa_context_excerpt,
         )
         return GateDecision(
             decision="block",

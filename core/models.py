@@ -42,6 +42,7 @@ class ChangeProposal:
 class AggregatedContext:
     proposal_id: str
     markdown: str
+    qa_context_excerpt: str
     artifact_path: Path
 
 

@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     # vibecheck cm <subcommand>
     cm_parser = subparsers.add_parser("cm", help="Competence model management")
     cm_sub = cm_parser.add_subparsers(dest="cm_command")
-    cm_init_parser = cm_sub.add_parser("init", help="Launch competence model initialization survey")
+    cm_init_parser = cm_sub.add_parser("init", help="Initialize competence model in terminal")
     cm_init_parser.add_argument(
         "--preset",
         choices=["max", "min"],

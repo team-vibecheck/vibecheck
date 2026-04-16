@@ -79,3 +79,21 @@ def test_presence_auto_resets_transient_state(tmp_path: Path) -> None:
     assert isinstance(active, dict)
     assert active["state"] == "sleeping"
     assert active["detail"] == "Waiting for agent loop"
+
+
+def test_presence_marks_inactive_watching_as_detached(tmp_path: Path, monkeypatch) -> None:
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("VIBECHECK_SIDECAR_INACTIVE_STATE_GRACE", "0")
+
+    set_session_state(
+        "session-a",
+        "watching",
+        state_dir=state_dir,
+        detail="Answer submitted",
+    )
+
+    snap = get_presence_snapshot(state_dir=state_dir)
+    active = snap["active_session"]
+    assert isinstance(active, dict)
+    assert active["state"] == "detached"
+    assert active["detail"] == "Session inactive"

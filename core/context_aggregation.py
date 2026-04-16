@@ -24,9 +24,15 @@ def build_aggregated_context(
     )
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(markdown, encoding="utf-8")
+    qa_excerpt = render_qa_context_excerpt(
+        proposal,
+        user_prompt_excerpt=user_prompt_excerpt,
+        surrounding_code=surrounding_code,
+    )
     return AggregatedContext(
         proposal_id=proposal.proposal_id,
         markdown=markdown,
+        qa_context_excerpt=qa_excerpt,
         artifact_path=artifact_path,
     )
 
@@ -87,5 +93,50 @@ def render_aggregated_context(
             "",
             "## Repo-Local Notes",
             repo_notes or "<none>",
+        ]
+    )
+
+
+def render_qa_context_excerpt(
+    proposal: ChangeProposal,
+    *,
+    user_prompt_excerpt: str,
+    surrounding_code: str,
+) -> str:
+    primary_target = proposal.targets[0] if proposal.targets else None
+    primary_path = primary_target.path if primary_target is not None else ""
+    primary_language = primary_target.language if primary_target is not None else None
+    new_code = "\n\n".join(target.new_content for target in proposal.targets)
+    diff = proposal.unified_diff or "<empty diff>"
+
+    return "\n".join(
+        [
+            "# QA Context",
+            "",
+            "## Metadata",
+            f"- proposal_id: {proposal.proposal_id}",
+            f"- session_id: {proposal.session_id}",
+            f"- tool_name: {proposal.tool_name}",
+            f"- files_changed: {proposal.diff_stats.files_changed}",
+            f"- primary_path: {primary_path}",
+            f"- primary_language: {primary_language or 'text'}",
+            "",
+            "## User Prompt",
+            user_prompt_excerpt or "<missing>",
+            "",
+            "## New Code",
+            "```text",
+            new_code,
+            "```",
+            "",
+            "## Unified Diff",
+            "```diff",
+            diff,
+            "```",
+            "",
+            "## Surrounding Code",
+            "```text",
+            surrounding_code or "<missing>",
+            "```",
         ]
     )

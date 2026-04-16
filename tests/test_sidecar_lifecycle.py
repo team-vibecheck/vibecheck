@@ -26,7 +26,9 @@ def test_resolve_port_reuses_healthy_saved_port(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(
         lifecycle,
         "_query_health",
-        lambda port: {"status": "ok", "current_question_id": None} if port == 7867 else None,
+        lambda port: {"status": "ok", "current_question_id": None, "compat_version": 2}
+        if port == 7867
+        else None,
     )
     monkeypatch.setattr(lifecycle, "_is_port_available", lambda port: False)
 
@@ -108,7 +110,11 @@ def test_ensure_sidecar_running_adopts_health_pid(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(lifecycle, "_STATE_DIR", state_dir)
     monkeypatch.setattr(lifecycle, "_SIDECAR_DIR", qa_dir)
     monkeypatch.setattr(lifecycle, "resolve_port", lambda preferred: (7865, False))
-    monkeypatch.setattr(lifecycle, "_query_health", lambda port: {"status": "ok", "pid": 9999})
+    monkeypatch.setattr(
+        lifecycle,
+        "_query_health",
+        lambda port: {"status": "ok", "pid": 9999, "current_question_id": None, "compat_version": 2},
+    )
     monkeypatch.setattr(
         lifecycle,
         "get_config",
@@ -189,7 +195,7 @@ def test_incompatible_health_recycled_then_spawned(tmp_path: Path, monkeypatch) 
             return {"status": "ok", "pid": 7777}
         if calls["query"] == 3:
             return None
-        return {"status": "ok", "pid": 8888, "current_question_id": None}
+        return {"status": "ok", "pid": 8888, "current_question_id": None, "compat_version": 2}
 
     class Proc:
         pid = 8888
@@ -223,3 +229,25 @@ def test_incompatible_health_recycled_then_spawned(tmp_path: Path, monkeypatch) 
     port, pid = lifecycle.ensure_sidecar_running()
     assert port == 7865
     assert pid == 8888
+
+
+def test_health_without_compat_version_is_incompatible() -> None:
+    assert lifecycle._is_compatible_health({"status": "ok", "current_question_id": None}) is False
+
+
+def test_health_with_old_compat_version_is_incompatible() -> None:
+    assert (
+        lifecycle._is_compatible_health(
+            {"status": "ok", "current_question_id": None, "compat_version": 1}
+        )
+        is False
+    )
+
+
+def test_health_with_required_compat_version_is_compatible() -> None:
+    assert (
+        lifecycle._is_compatible_health(
+            {"status": "ok", "current_question_id": None, "compat_version": 2}
+        )
+        is True
+    )

@@ -16,7 +16,24 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 from qa.sidecar.leases import list_active_leases
 
 ENV_SESSION_RETENTION = "VIBECHECK_SIDECAR_SESSION_RETENTION"
+ENV_INACTIVE_STATE_GRACE = "VIBECHECK_SIDECAR_INACTIVE_STATE_GRACE"
 DEFAULT_SESSION_RETENTION_SECONDS = 3600
+DEFAULT_INACTIVE_STATE_GRACE_SECONDS = 90
+
+_INACTIVE_TO_DETACHED_STATES = {
+    "starting",
+    "watching",
+    "gate_thinking",
+    "gate_allow",
+    "gate_block",
+    "qa_waiting_submission",
+    "qa_evaluating",
+    "qa_pass",
+    "qa_fail_attempt",
+    "qa_fail_terminal",
+    "recovering",
+    "error",
+}
 
 _STATE_META: dict[str, dict[str, str]] = {
     "starting": {"emoji": "🚀", "label": "Starting"},
@@ -180,6 +197,17 @@ def session_retention_seconds() -> int:
     return DEFAULT_SESSION_RETENTION_SECONDS
 
 
+def inactive_state_grace_seconds() -> int:
+    raw = os.environ.get(ENV_INACTIVE_STATE_GRACE)
+    if raw is None:
+        return DEFAULT_INACTIVE_STATE_GRACE_SECONDS
+    with contextlib.suppress(ValueError):
+        parsed = int(raw)
+        if parsed >= 0:
+            return parsed
+    return DEFAULT_INACTIVE_STATE_GRACE_SECONDS
+
+
 def _active_session_ids(state_dir: Path | None) -> set[str]:
     records = list_active_leases(prune=True, state_dir=state_dir)
     return {
@@ -191,6 +219,7 @@ def _active_session_ids(state_dir: Path | None) -> set[str]:
 
 def _prune_inactive(payload: dict[str, Any], active_sessions: set[str]) -> bool:
     retention = session_retention_seconds()
+    inactive_grace = inactive_state_grace_seconds()
     now = datetime.now(UTC)
     changed = False
 
@@ -210,6 +239,21 @@ def _prune_inactive(payload: dict[str, Any], active_sessions: set[str]) -> bool:
             continue
 
         age_seconds = max((now - updated).total_seconds(), 0.0)
+        state_key = str(raw.get("state") or "")
+
+        if state_key in _INACTIVE_TO_DETACHED_STATES and age_seconds >= inactive_grace:
+            detached_state = _state_payload("detached")
+            raw["state"] = "detached"
+            raw["emoji"] = detached_state["emoji"]
+            raw["label"] = detached_state["label"]
+            raw["detail"] = "Session inactive"
+            raw["updated_at"] = _utc_now_iso()
+            raw.pop("auto_reset_from", None)
+            raw.pop("auto_reset_to", None)
+            raw.pop("auto_reset_at", None)
+            changed = True
+            continue
+
         if age_seconds >= retention:
             sessions.pop(session_id, None)
             changed = True

@@ -1,4 +1,4 @@
-"""``vibecheck cm init`` — launch competence model initialization survey."""
+"""``vibecheck cm init`` — initialize competence model in the terminal."""
 
 from __future__ import annotations
 
@@ -26,15 +26,7 @@ def run_cm_init(*, preset: str | None = None) -> None:
                 print("Aborted.")
                 sys.exit(0)
 
-        # Try Gradio first, fall back to terminal
-        try:
-            from qa.init_survey import run_gradio_survey
-
-            print("Launching competence model survey in your browser...")
-            model = run_gradio_survey(output_path)
-        except RuntimeError:
-            print("Gradio not available — using terminal survey.")
-            model = _terminal_survey(output_path)
+        model = _terminal_survey(output_path)
 
     if model is None:
         print("Survey timed out. No changes made.", file=sys.stderr)

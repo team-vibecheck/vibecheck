@@ -88,6 +88,7 @@ class SidecarClient:
                 pid,
                 state_dir=self._state_dir,
                 allow_reopen_after_seconds=self._qa_reopen_cooldown_seconds,
+                session_id=effective_session,
             )
         self._last_pid = pid
         self._log(
@@ -246,6 +247,13 @@ class SidecarClient:
                     continue
             except urllib.error.HTTPError as exc:
                 if exc.code in (202, 204, 404):
+                    if exc.code == 404:
+                        self._log(
+                            "sidecar_question_unknown",
+                            question_id=question_id,
+                            status_code=404,
+                        )
+                        return ""
                     pass
                 elif exc.code == 422:
                     payload = exc.read().decode("utf-8", errors="replace")
