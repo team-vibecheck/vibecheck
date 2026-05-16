@@ -40,3 +40,4 @@ The workflow lives at `.github/workflows/ci.yml`.
 - Runtime auth resolves `OPENROUTER_API_KEY` first, then falls back to `~/.vibecheck/config.toml`.
 - Terminal QA is the day-one path.
 - `qa/gradio_renderer.py` is the optional Python web UI seam if richer browser-based QA becomes necessary.
+- Project report is at `REPORT.md`
